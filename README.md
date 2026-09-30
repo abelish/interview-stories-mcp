@@ -82,6 +82,7 @@ uv run pytest        # unit tests plus end-to-end tests that drive server.py ove
 uv run ruff check .
 uv run ruff format .
 uv run pyright
+uv run python -m evals.retrieval --verbose   # search quality report
 ```
 
 Tests always point `STORIES_PATH` at a temp file, so they never touch your real stories.

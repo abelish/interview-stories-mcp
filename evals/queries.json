@@ -1,0 +1,74 @@
+[
+  {"id": "coworker-disagreement", "question": "Tell me about a time you disagreed with a coworker.", "keywords": "disagreement coworker conflict", "best": "api-design-peer", "acceptable": ["hard-feedback-to-teammate", "pushback-on-roadmap"]},
+  {"id": "peer-conflict-resolution", "question": "Describe a conflict with a peer and how you resolved it.", "keywords": "peer conflict resolved", "best": "api-design-peer", "acceptable": ["hard-feedback-to-teammate"]},
+  {"id": "technical-argument", "question": "Have you ever had a strong technical disagreement with another engineer?", "keywords": "technical disagreement engineer design", "best": "api-design-peer", "acceptable": ["disagree-and-commit"]},
+
+  {"id": "disagree-with-boss", "question": "Tell me about a time you disagreed with your boss.", "keywords": "disagree boss manager", "best": "pushback-on-roadmap", "acceptable": ["disagree-and-commit"]},
+  {"id": "unrealistic-plan", "question": "Describe a time you were given an unrealistic plan or deadline by leadership.", "keywords": "unrealistic plan deadline leadership pushback", "best": "pushback-on-roadmap", "acceptable": ["compliance-crunch"]},
+  {"id": "managing-up", "question": "How have you managed up when you thought your manager was making a mistake?", "keywords": "managing up manager mistake", "best": "pushback-on-roadmap", "acceptable": ["disagree-and-commit", "raised-privacy-concern"]},
+
+  {"id": "disagree-commit", "question": "Tell me about a time you had to support a decision you disagreed with.", "keywords": "support decision disagreed commit", "best": "disagree-and-commit", "acceptable": ["pushback-on-roadmap"]},
+  {"id": "overruled", "question": "What did you do when you were overruled on something you cared about?", "keywords": "overruled decision", "best": "disagree-and-commit", "acceptable": ["pushback-on-roadmap"]},
+
+  {"id": "failure", "question": "Tell me about a time you failed.", "keywords": "failure failed", "best": "missed-launch", "acceptable": ["caused-outage", "data-changed-direction"]},
+  {"id": "missed-deadline", "question": "Describe a project where you missed a deadline.", "keywords": "missed deadline late project", "best": "missed-launch", "acceptable": []},
+  {"id": "bad-news-late", "question": "Have you ever delivered bad news too late?", "keywords": "bad news late status risk", "best": "missed-launch", "acceptable": ["unhappy-executive"]},
+
+  {"id": "mistake", "question": "Tell me about a mistake you made and how you handled it.", "keywords": "mistake handled", "best": "caused-outage", "acceptable": ["missed-launch"]},
+  {"id": "production-incident", "question": "Walk me through a production incident you were responsible for.", "keywords": "production incident outage responsible", "best": "caused-outage", "acceptable": []},
+  {"id": "broke-something", "question": "What's the biggest thing you've ever broken at work?", "keywords": "broke outage down", "best": "caused-outage", "acceptable": []},
+
+  {"id": "influence-without-authority", "question": "Tell me about a time you influenced people without having formal authority.", "keywords": "influence without authority", "best": "logging-standard-influence", "acceptable": ["four-team-migration"]},
+  {"id": "convince-other-teams", "question": "How did you get other teams to adopt something you built?", "keywords": "convince teams adopt standard", "best": "logging-standard-influence", "acceptable": ["hackathon-to-product"]},
+  {"id": "drive-change", "question": "Describe a time you drove a change across an organization.", "keywords": "drive change organization", "best": "logging-standard-influence", "acceptable": ["faster-ci", "four-team-migration"]},
+
+  {"id": "leadership", "question": "Give me an example of your leadership.", "keywords": "leadership led team", "best": "stepped-up-to-lead", "acceptable": ["logging-standard-influence", "four-team-migration"]},
+  {"id": "stepped-up", "question": "Tell me about a time you stepped up when nobody else would.", "keywords": "stepped up lead", "best": "stepped-up-to-lead", "acceptable": ["faster-ci", "learned-rust-fast"]},
+  {"id": "low-morale", "question": "How have you handled a team with low morale?", "keywords": "team morale low", "best": "stepped-up-to-lead", "acceptable": []},
+
+  {"id": "ambiguity", "question": "Tell me about a time you had to deal with ambiguity.", "keywords": "ambiguity ambiguous unclear", "best": "vague-analytics-project", "acceptable": []},
+  {"id": "unclear-requirements", "question": "Describe a project where the requirements were unclear.", "keywords": "unclear requirements vague spec", "best": "vague-analytics-project", "acceptable": []},
+  {"id": "from-scratch", "question": "Tell me about building something from scratch with little direction.", "keywords": "build scratch little direction", "best": "vague-analytics-project", "acceptable": ["hackathon-to-product"]},
+
+  {"id": "prioritization", "question": "How do you prioritize when everything is urgent?", "keywords": "prioritize urgent competing requests", "best": "saying-no-to-requests", "acceptable": ["compliance-crunch", "pushback-on-roadmap"]},
+  {"id": "saying-no", "question": "Tell me about a time you had to say no to a stakeholder.", "keywords": "say no stakeholder", "best": "saying-no-to-requests", "acceptable": ["pushback-on-roadmap", "raised-privacy-concern"]},
+  {"id": "too-much-work", "question": "What do you do when your team has more work than capacity?", "keywords": "more work than capacity overloaded team", "best": "saying-no-to-requests", "acceptable": ["pushback-on-roadmap"]},
+
+  {"id": "tight-deadline", "question": "Tell me about a time you worked under a tight deadline.", "keywords": "tight deadline pressure", "best": "compliance-crunch", "acceptable": ["missed-launch", "learned-rust-fast"]},
+  {"id": "pressure", "question": "How do you perform under pressure?", "keywords": "pressure", "best": "compliance-crunch", "acceptable": ["customer-data-recovery", "caused-outage"]},
+
+  {"id": "mentoring", "question": "Tell me about someone you mentored.", "keywords": "mentored mentoring junior", "best": "mentoring-junior", "acceptable": []},
+  {"id": "develop-others", "question": "How have you helped a less experienced engineer grow?", "keywords": "help junior engineer grow develop", "best": "mentoring-junior", "acceptable": ["stepped-up-to-lead"]},
+
+  {"id": "give-hard-feedback", "question": "Tell me about a time you gave difficult feedback.", "keywords": "difficult feedback gave", "best": "hard-feedback-to-teammate", "acceptable": []},
+  {"id": "difficult-colleague", "question": "Describe working with a difficult colleague.", "keywords": "difficult colleague", "best": "hard-feedback-to-teammate", "acceptable": ["api-design-peer", "unhappy-executive"]},
+
+  {"id": "receive-criticism", "question": "Tell me about a time you received critical feedback.", "keywords": "received critical feedback criticism", "best": "receiving-criticism", "acceptable": []},
+  {"id": "weakness", "question": "What's a weakness you've worked to improve?", "keywords": "weakness improve", "best": "receiving-criticism", "acceptable": []},
+  {"id": "self-improvement", "question": "Describe a time you changed your behavior based on feedback.", "keywords": "changed behavior feedback", "best": "receiving-criticism", "acceptable": ["hard-feedback-to-teammate"]},
+
+  {"id": "customer-focus", "question": "Tell me about a time you went above and beyond for a customer.", "keywords": "above and beyond customer", "best": "customer-data-recovery", "acceptable": []},
+  {"id": "customer-obsession", "question": "Give an example of putting the customer first.", "keywords": "customer first", "best": "customer-data-recovery", "acceptable": ["vague-analytics-project"]},
+
+  {"id": "data-decision", "question": "Tell me about a decision you made using data.", "keywords": "data driven decision metrics", "best": "data-changed-direction", "acceptable": ["hackathon-to-product", "faster-ci"]},
+  {"id": "changed-mind", "question": "Describe a time you changed your mind.", "keywords": "changed mind wrong assumption", "best": "data-changed-direction", "acceptable": ["receiving-criticism"]},
+  {"id": "kill-project", "question": "Have you ever stopped a project you started?", "keywords": "stop cancel project pivot", "best": "data-changed-direction", "acceptable": []},
+
+  {"id": "learn-quickly", "question": "Tell me about a time you had to learn something new quickly.", "keywords": "learn new quickly", "best": "learned-rust-fast", "acceptable": []},
+  {"id": "unfamiliar-tech", "question": "Describe working with a technology you didn't know.", "keywords": "unfamiliar technology new language", "best": "learned-rust-fast", "acceptable": []},
+
+  {"id": "initiative", "question": "Tell me about a time you took initiative.", "keywords": "initiative", "best": "faster-ci", "acceptable": ["hackathon-to-product", "vague-analytics-project", "logging-standard-influence"]},
+  {"id": "improve-process", "question": "Describe a process you improved.", "keywords": "improved process efficiency", "best": "faster-ci", "acceptable": ["saying-no-to-requests"]},
+
+  {"id": "cross-team", "question": "Tell me about a project that required coordinating several teams.", "keywords": "coordinate multiple teams cross-team", "best": "four-team-migration", "acceptable": ["logging-standard-influence", "compliance-crunch"]},
+  {"id": "large-project", "question": "Describe the most complex project you've managed.", "keywords": "complex project managed", "best": "four-team-migration", "acceptable": ["stepped-up-to-lead"]},
+
+  {"id": "innovation", "question": "Tell me about an innovative idea you brought to life.", "keywords": "innovative idea new", "best": "hackathon-to-product", "acceptable": ["vague-analytics-project"]},
+  {"id": "sell-idea", "question": "How did you get buy-in for an idea?", "keywords": "buy-in idea proposal", "best": "hackathon-to-product", "acceptable": ["logging-standard-influence", "pushback-on-roadmap"]},
+
+  {"id": "difficult-stakeholder", "question": "Tell me about working with a difficult stakeholder.", "keywords": "difficult stakeholder", "best": "unhappy-executive", "acceptable": ["saying-no-to-requests"]},
+  {"id": "rebuild-trust", "question": "Describe a time you had to rebuild trust.", "keywords": "rebuild trust", "best": "unhappy-executive", "acceptable": ["caused-outage"]},
+
+  {"id": "ethics", "question": "Tell me about a time you faced an ethical dilemma at work.", "keywords": "ethical dilemma", "best": "raised-privacy-concern", "acceptable": []},
+  {"id": "speak-up", "question": "Describe a time you spoke up about something you thought was wrong.", "keywords": "spoke up wrong concern", "best": "raised-privacy-concern", "acceptable": ["pushback-on-roadmap", "hard-feedback-to-teammate"]}
+]

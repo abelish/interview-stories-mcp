@@ -32,7 +32,7 @@ target-version = "py311"
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.pyright]
-include = ["server.py", "stories", "tests"]
+include = ["server.py", "stories", "evals", "tests"]
 pythonVersion = "3.11"
 typeCheckingMode = "standard"
 venvPath = "."
