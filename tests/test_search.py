@@ -1,17 +1,230 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import numpy as np
 import pytest
 
-from stories import storage
+from stories import search, storage
+from stories.search import SemanticIndex
+from stories.storage import Story
 from tests.helpers import add_story
 
-WHOLE_PHRASE_ONLY = pytest.mark.xfail(
-    strict=True, reason="Bug: search only matches the whole query as one exact substring"
-)
+# --- A deterministic fake embedder --------------------------------------------------------
+
+VOCAB = ("conflict", "peer", "manager", "deadline", "mentor", "customer")
+
+
+class FakeEmbedder:
+    """Embeds text as counts of a few vocabulary words, so similarity is predictable."""
+
+    passages_embedded: list[str]
+
+    def __init__(self) -> None:
+        self.passages_embedded = []
+
+    @staticmethod
+    def _vector(text: str) -> np.ndarray:
+        words = text.lower()
+        return np.array([words.count(w) for w in VOCAB], dtype=np.float32) + 1e-3
+
+    def embed_passages(self, texts: list[str]) -> list[np.ndarray]:
+        self.passages_embedded.extend(texts)
+        return [self._vector(t) for t in texts]
+
+    def embed_query(self, text: str) -> np.ndarray:
+        return self._vector(text)
 
 
 @pytest.fixture
-def peer_conflict() -> storage.Story:
+def embedder() -> FakeEmbedder:
+    return FakeEmbedder()
+
+
+@pytest.fixture
+def index(embedder: FakeEmbedder) -> SemanticIndex:
+    return SemanticIndex(load_embedder=lambda: embedder)
+
+
+def _ids(stories: list[Story]) -> list[str]:
+    return [s.id for s in stories]
+
+
+# --- Tokenizing ---------------------------------------------------------------------------
+
+
+def test_tokenize_lowercases_stems_and_drops_stopwords() -> None:
+    assert search.tokenize("Tell me about a time you MENTORED someone") == ["mentor", "someon"]
+
+
+def test_tokenize_splits_on_punctuation_hyphens_and_underscores() -> None:
+    assert search.tokenize("cross-team, data_driven!") == ["cross", "team", "data", "driven"]
+
+
+def test_tokenize_keeps_non_ascii_words() -> None:
+    assert search.tokenize("café") == ["café"]
+
+
+# --- Keyword ranking ------------------------------------------------------------------------
+
+
+def test_keyword_rank_matches_any_query_word() -> None:
+    story = add_story(tags=["conflict"], action="I sat down with my peer.")
+
+    assert _ids(search.keyword_rank("conflict with a peer", storage.list_stories())) == [story.id]
+
+
+def test_keyword_rank_does_not_require_adjacent_words() -> None:
+    story = add_story(situation="We missed the deadline by a week.")
+
+    assert _ids(search.keyword_rank("missed deadline", storage.list_stories())) == [story.id]
+
+
+def test_keyword_rank_matches_word_forms_via_stemming() -> None:
+    story = add_story(action="I mentored a new graduate.")
+
+    assert _ids(search.keyword_rank("mentoring", storage.list_stories())) == [story.id]
+
+
+def test_keyword_rank_weights_tags_over_title_over_body() -> None:
+    # Titles of similar length, so BM25's length normalization doesn't dominate the field weights.
+    in_body = add_story(title="Launch retrospective", tags=["other"], situation="There was friction over negotiation.")
+    in_title = add_story(title="Contract negotiation", tags=["other"])
+    in_tags = add_story(title="Launch retrospective", tags=["negotiation"])
+
+    ranked = search.keyword_rank("negotiation", storage.list_stories())
+
+    assert _ids(ranked) == [in_tags.id, in_title.id, in_body.id]
+
+
+def test_keyword_rank_does_not_penalize_stories_for_having_more_tags() -> None:
+    few = add_story(title="Launch retrospective", tags=["negotiation"])
+    many = add_story(title="Launch retrospective", tags=["negotiation", "conflict", "deadline", "ownership"])
+
+    ranked = search.keyword_rank("negotiation", storage.list_stories())
+
+    assert _ids(ranked) == [few.id, many.id]  # an exact tie, kept in original order
+
+
+def test_keyword_rank_prefers_rarer_words() -> None:
+    common = add_story(title="Deadline one", tags=["deadline"])
+    add_story(title="Deadline two", tags=["deadline"])
+    rare = add_story(title="Mentor", tags=["mentoring"])
+
+    ranked = search.keyword_rank("deadline mentoring", storage.list_stories())
+
+    assert ranked[0].id == rare.id
+    assert common.id in _ids(ranked)
+
+
+def test_keyword_rank_leaves_out_non_matches_and_keeps_order_on_ties() -> None:
+    first = add_story(title="First", tags=["conflict"])
+    add_story(title="Unrelated", tags=["other"], situation="s", task="t", action="a", result="r", learning="l")
+    second = add_story(title="Second", tags=["conflict"])
+
+    assert _ids(search.keyword_rank("conflict", storage.list_stories())) == [first.id, second.id]
+
+
+@pytest.mark.parametrize("query", ["", "   ", "tell me about a time you"])
+def test_keyword_rank_with_no_meaningful_words_matches_nothing(query: str) -> None:
+    add_story()
+
+    assert search.keyword_rank(query, storage.list_stories()) == []
+
+
+def test_keyword_rank_searches_every_star_l_part() -> None:
+    story = add_story(learning="Flag schedule risk early.")
+
+    assert _ids(search.keyword_rank("schedule risk", storage.list_stories())) == [story.id]
+
+
+# --- Semantic ranking -----------------------------------------------------------------------
+
+
+def test_semantic_rank_orders_all_stories_by_similarity(index: SemanticIndex) -> None:
+    customer = add_story(title="Customer", tags=["customer"], situation="A customer customer issue.")
+    mentor = add_story(title="Mentor", tags=["mentor"], situation="I was a mentor to a mentor.")
+
+    ranked = index.rank("mentor", storage.list_stories())
+
+    assert ranked is not None
+    assert _ids(ranked) == [mentor.id, customer.id]
+
+
+def test_semantic_index_embeds_each_story_once(index: SemanticIndex, embedder: FakeEmbedder) -> None:
+    add_story(title="One")
+    add_story(title="Two")
+
+    index.rank("conflict", storage.list_stories())
+    index.rank("deadline", storage.list_stories())
+
+    assert len(embedder.passages_embedded) == 2
+
+
+def test_semantic_index_re_embeds_edited_stories(index: SemanticIndex, embedder: FakeEmbedder) -> None:
+    story = add_story(title="Before")
+    index.rank("conflict", storage.list_stories())
+
+    storage.update_story(story.id, title="After")
+    index.rank("conflict", storage.list_stories())
+
+    assert len(embedder.passages_embedded) == 2
+    assert embedder.passages_embedded[1].startswith("After.")
+
+
+def test_semantic_index_returns_none_when_model_fails_and_retries_later(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+    embedder = FakeEmbedder()
+
+    def load() -> FakeEmbedder:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise OSError("no network")
+        return embedder
+
+    clock = [1000.0]
+    monkeypatch.setattr(search.time, "monotonic", lambda: clock[0])
+    index = SemanticIndex(load_embedder=load)
+    add_story()
+
+    assert index.rank("conflict", storage.list_stories()) is None
+    assert index.rank("conflict", storage.list_stories()) is None  # too soon to retry
+    assert len(attempts) == 1
+
+    clock[0] += search.RETRY_AFTER_SECONDS
+    assert index.rank("conflict", storage.list_stories()) is not None
+    assert len(attempts) == 2
+
+
+# --- Fusion -------------------------------------------------------------------------------------
+
+
+def _story(story_id: str) -> Story:
+    return Story(id=story_id, title="", tags=[], situation="", task="", action="", result="", learning="",
+                 created_at="", updated_at="")  # fmt: skip
+
+
+def test_fuse_rewards_stories_ranked_high_in_either_list() -> None:
+    a, b, c = _story("a"), _story("b"), _story("c")
+
+    # a and c each score 1/61 + 1/63, just above b's 2/62. The a/c tie keeps first-seen order.
+    assert _ids(search.fuse([a, b, c], [c, b, a])) == ["a", "c", "b"]
+    # Appearing in both lists beats appearing high in only one.
+    assert _ids(search.fuse([a], [b, a])) == ["a", "b"]
+
+
+def test_fuse_includes_stories_from_every_ranking_once() -> None:
+    a, b, c = _story("a"), _story("b"), _story("c")
+
+    assert sorted(_ids(search.fuse([a, b], [b, c]))) == ["a", "b", "c"]
+
+
+# --- search_stories -------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def peer_conflict() -> Story:
     return add_story(
         title="Disagreeing on an API design",
         tags=["conflict", "collaboration"],
@@ -20,19 +233,101 @@ def peer_conflict() -> storage.Story:
 
 
 @pytest.fixture
-def slipped_date() -> storage.Story:
+def slipped_date() -> Story:
     return add_story(title="Launch slipped", tags=["failure"], situation="We missed the deadline by a week.")
 
 
-@WHOLE_PHRASE_ONLY
-def test_natural_language_query_finds_story(peer_conflict: storage.Story) -> None:
-    assert [s.id for s in storage.search_stories("conflict with a peer")] == [peer_conflict.id]
+def test_natural_language_query_finds_story(peer_conflict: Story, slipped_date: Story, index: SemanticIndex) -> None:
+    found = search.search_stories("conflict with a peer", index=index)
+
+    assert found[0].id == peer_conflict.id
 
 
-@WHOLE_PHRASE_ONLY
-def test_query_words_need_not_be_adjacent(slipped_date: storage.Story) -> None:
-    assert [s.id for s in storage.search_stories("missed deadline")] == [slipped_date.id]
+def test_query_words_need_not_be_adjacent(peer_conflict: Story, slipped_date: Story, index: SemanticIndex) -> None:
+    found = search.search_stories("missed deadline", index=index)
+
+    assert found[0].id == slipped_date.id
 
 
-def test_unrelated_query_finds_nothing(peer_conflict: storage.Story, slipped_date: storage.Story) -> None:
-    assert storage.search_stories("negotiation") == []
+def test_search_respects_limit(index: SemanticIndex) -> None:
+    for i in range(4):
+        add_story(title=f"Story {i}")
+
+    assert len(search.search_stories("conflict", limit=2, index=index)) == 2
+    assert len(search.search_stories("conflict", limit=10, index=index)) == 4
+
+
+def test_hybrid_returns_semantic_matches_that_share_no_words(index: SemanticIndex) -> None:
+    add_story(title="Coaching", tags=["mentor"], situation="I was a mentor.")
+
+    assert search.search_stories("zzz-unrelated-word", index=index) != []
+    assert search.search_stories("zzz-unrelated-word", mode="keyword", index=index) == []
+
+
+def test_hybrid_falls_back_to_keyword_when_model_unavailable(peer_conflict: Story, slipped_date: Story) -> None:
+    def fail() -> FakeEmbedder:
+        raise OSError("offline")
+
+    index = SemanticIndex(load_embedder=fail)
+
+    assert _ids(search.search_stories("missed deadline", index=index)) == [slipped_date.id]
+
+
+def test_keyword_mode_never_loads_the_model(peer_conflict: Story) -> None:
+    def fail() -> FakeEmbedder:
+        raise AssertionError("keyword mode must not load the model")
+
+    assert _ids(search.search_stories("conflict", mode="keyword", index=SemanticIndex(load_embedder=fail))) == [
+        peer_conflict.id
+    ]
+
+
+def test_semantic_mode_uses_only_embeddings(index: SemanticIndex) -> None:
+    mentor = add_story(title="Mentor", tags=["mentor"], situation="mentor mentor")
+
+    assert _ids(search.search_stories("zzz mentor", mode="semantic", index=index))[0] == mentor.id
+
+
+@pytest.mark.parametrize(("query", "limit", "message"), [("  ", 5, "query can't be blank"), ("x", 0, "limit")])
+def test_search_rejects_bad_input(query: str, limit: int, message: str, index: SemanticIndex) -> None:
+    with pytest.raises(storage.InvalidStoryError, match=message):
+        search.search_stories(query, limit=limit, index=index)
+
+
+def test_search_with_no_stories_returns_nothing(index: SemanticIndex) -> None:
+    assert search.search_stories("conflict", index=index) == []
+
+
+def test_search_tolerates_records_missing_learning(stories_path: Path, index: SemanticIndex) -> None:
+    record = {
+        "id": "legacy",
+        "title": "Old story",
+        "tags": ["conflict"],
+        "situation": "s",
+        "task": "t",
+        "action": "a",
+        "result": "r",
+        "created_at": "x",
+        "updated_at": "x",
+    }
+    stories_path.write_text(json.dumps([record]), encoding="utf-8")
+
+    assert _ids(search.search_stories("conflict", index=index)) == ["legacy"]
+
+
+# --- The real model ------------------------------------------------------------------------------
+
+
+def test_real_model_ranks_a_paraphrase_first() -> None:
+    """Uses the actual bge-small model (downloaded once and cached) to check the semantic path end to end."""
+    peer = add_story(
+        title="Settling an API design dispute",
+        tags=["collaboration"],
+        situation="Another senior engineer and I had opposite views on the design.",
+    )
+    add_story(title="Faster builds", tags=["initiative"], situation="Our CI pipeline took forty minutes.")
+
+    ranked = search.SemanticIndex().rank("a disagreement with a coworker", storage.list_stories())
+
+    assert ranked is not None, "embedding model failed to load"
+    assert ranked[0].id == peer.id

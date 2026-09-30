@@ -80,14 +80,6 @@ def test_delete_missing_returns_false() -> None:
     assert storage.delete_story("missing") is False
 
 
-def test_search_matches_exact_substring_case_insensitively() -> None:
-    story = _add(tags=["Conflict"])
-
-    assert [s.id for s in storage.search_stories("conflict")] == [story.id]
-    assert [s.id for s in storage.search_stories("STAKEHOLDERS")] == [story.id]
-    assert storage.search_stories("unrelated") == []
-
-
 def test_unicode_round_trips(stories_path: Path) -> None:
     story = _add(title="Café launch — résumé")
 
@@ -113,12 +105,6 @@ def test_update_changes_learning() -> None:
     assert updated.result == story.result
 
 
-def test_search_matches_learning() -> None:
-    story = _add()
-
-    assert [s.id for s in storage.search_stories("schedule risk")] == [story.id]
-
-
 def test_record_saved_before_star_l_loads_with_empty_learning(stories_path: Path) -> None:
     legacy = {
         "id": "legacy",
@@ -137,7 +123,6 @@ def test_record_saved_before_star_l_loads_with_empty_learning(stories_path: Path
     assert story is not None
     assert story.learning == ""
     assert [s.id for s in storage.list_stories()] == ["legacy"]
-    assert [s.id for s in storage.search_stories("conflict")] == ["legacy"]
 
     updated = storage.update_story("legacy", learning="Now filled in.")
     assert updated is not None

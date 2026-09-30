@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import functools
 import inspect
+import logging
+import re
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated, Any, TypeVar
@@ -10,7 +13,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
-from stories import storage
+from stories import search, storage
 from stories.storage import Story, StoryError
 
 mcp = MCPServer("interview-stories")
@@ -30,6 +33,12 @@ LEARNING = (
     "What you took away from the experience and what you'd do differently next time. "
     "Keep this distinct from the result."
 )
+QUERY = (
+    "An interview question or scenario, as-is or as keywords, e.g. "
+    "'Tell me about a time you disagreed with your manager' or 'conflict manager'."
+)
+LIMIT = "The most stories to return, best first."
+SUMMARY_SENTENCE_CHARS = 200
 
 
 @dataclass
@@ -37,7 +46,29 @@ class StorySummary:
     id: str
     title: str
     tags: list[str]
+    summary: Annotated[str, Field(description="The first sentence of the situation and of the result.")]
     needs_learning: Annotated[bool, Field(description="True when the story has no learning yet.")]
+
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s")
+
+
+def _first_sentence(text: str) -> str:
+    sentence = _SENTENCE_END.split(text.strip(), maxsplit=1)[0]
+    if len(sentence) <= SUMMARY_SENTENCE_CHARS:
+        return sentence
+    return sentence[: SUMMARY_SENTENCE_CHARS - 3].rstrip() + "..."
+
+
+def summarize(story: Story) -> StorySummary:
+    parts = [_first_sentence(story.situation), _first_sentence(story.result)]
+    return StorySummary(
+        id=story.id,
+        title=story.title,
+        tags=story.tags,
+        summary=" ".join(p for p in parts if p),
+        needs_learning=not story.learning.strip(),
+    )
 
 
 def tool(fn: F) -> F:
@@ -65,14 +96,12 @@ def _not_found(story_id: str) -> ToolError:
 
 @tool
 def list_stories() -> list[StorySummary]:
-    """List all saved interview stories with id, title, and tags (not the full STAR-L text).
+    """List every saved interview story with its id, title, tags, and a one-line summary.
 
-    needs_learning is true for stories that are missing their learning.
+    Use this to browse or to choose between stories yourself. It doesn't include the full STAR-L
+    text, which get_story returns. needs_learning is true for stories missing their learning.
     """
-    return [
-        StorySummary(id=s.id, title=s.title, tags=s.tags, needs_learning=not s.learning.strip())
-        for s in storage.list_stories()
-    ]
+    return [summarize(s) for s in storage.list_stories()]
 
 
 @tool
@@ -85,12 +114,17 @@ def get_story(story_id: str) -> Story:
 
 
 @tool
-def search_stories(query: str) -> list[Story]:
-    """Search stories by keyword across title, tags, and STAR-L text.
+def search_stories(
+    query: Annotated[str, Field(description=QUERY, min_length=1)],
+    limit: Annotated[int, Field(description=LIMIT, ge=1, le=20)] = search.DEFAULT_LIMIT,
+) -> list[Story]:
+    """Find the stories that best fit an interview question or scenario, best first, with full STAR-L text.
 
-    Useful for finding a story that fits a scenario like 'conflict with a peer' or 'missed deadline'.
+    Matches meaning as well as keywords, so the interview question can be passed as-is. It returns
+    the closest stories even when none is a good fit, so check that a result actually answers the
+    question before using it.
     """
-    return storage.search_stories(query)
+    return search.search_stories(query, limit=limit)
 
 
 @tool
@@ -146,6 +180,11 @@ def delete_story(story_id: str) -> str:
 
 
 def main() -> None:
+    # The model download logs every HTTP request at INFO. Keep stderr (Claude's MCP log) readable.
+    for noisy in ("httpx", "huggingface_hub"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    # Load the embedding model in the background so the first search doesn't wait for it.
+    threading.Thread(target=search.warm_up, name="embedding-warm-up", daemon=True).start()
     mcp.run()
 
 

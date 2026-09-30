@@ -4,9 +4,14 @@ Runs every labeled query in evals/queries.json against the synthetic stories in 
 in two forms: the raw interview question (as Claude might pass it straight through) and a keyword
 rewrite (as Claude might send after reformulating). No LLM is involved, so results are deterministic.
 
-    uv run python -m evals.retrieval              # summary table
-    uv run python -m evals.retrieval --verbose    # plus every query where the best story wasn't ranked first
-    uv run python -m evals.retrieval --update-thresholds   # ratchet the minimums in thresholds.json up
+    uv run python -m evals.retrieval                    # hybrid search, the default the server uses
+    uv run python -m evals.retrieval --mode keyword     # the keyword-only fallback
+    uv run python -m evals.retrieval --verbose          # plus every query whose best story wasn't first
+    uv run python -m evals.retrieval --update-thresholds   # ratchet this mode's minimums up
+    uv run python -m evals.retrieval --personal         # your own questions against your real stories
+
+--personal reads data/eval_queries.json (gitignored, same format as evals/queries.json, with
+"keywords" optional) and runs it against a temp copy of your stories. It reports but never gates.
 """
 
 from __future__ import annotations
@@ -21,18 +26,22 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
-from stories import storage
+from stories import search, storage
 from stories.storage import Story
 
 EVALS_DIR = Path(__file__).resolve().parent
 CORPUS_PATH = EVALS_DIR / "corpus.json"
 QUERIES_PATH = EVALS_DIR / "queries.json"
 THRESHOLDS_PATH = EVALS_DIR / "retrieval_thresholds.json"
+PERSONAL_QUERIES_PATH = storage.DEFAULT_DATA_PATH.parent / "eval_queries.json"
 
 FORMS = ("question", "keywords")
+GATED_MODES: tuple[search.Mode, ...] = ("hybrid", "keyword")
 TOP_K = 3
+# Rank every story, so MRR sees the full ranking rather than the server's default limit.
+EVAL_LIMIT = 10_000
 
 SearchFn = Callable[[str], Sequence[Story]]
 
@@ -41,11 +50,11 @@ SearchFn = Callable[[str], Sequence[Story]]
 class Query:
     id: str
     question: str
-    keywords: str
+    keywords: str | None
     best: str
     acceptable: tuple[str, ...]
 
-    def text(self, form: str) -> str:
+    def text(self, form: str) -> str | None:
         return self.question if form == "question" else self.keywords
 
 
@@ -88,19 +97,19 @@ class Metrics:
 HIGHER_IS_BETTER = {"top1": True, "top3": True, "mrr": True, "relevant_top3": True, "empty": False}
 
 
-def load_corpus() -> list[dict[str, Any]]:
-    return json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+def load_corpus(path: Path = CORPUS_PATH) -> list[dict[str, Any]]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def load_queries() -> list[Query]:
-    raw = json.loads(QUERIES_PATH.read_text(encoding="utf-8"))
+def load_queries(path: Path = QUERIES_PATH) -> list[Query]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
     return [
         Query(
             id=q["id"],
             question=q["question"],
-            keywords=q["keywords"],
+            keywords=q.get("keywords"),
             best=q["best"],
-            acceptable=tuple(q["acceptable"]),
+            acceptable=tuple(q.get("acceptable", [])),
         )
         for q in raw
     ]
@@ -123,14 +132,24 @@ def isolated_store(records: list[dict[str, Any]]) -> Generator[Path, None, None]
                 os.environ["STORIES_PATH"] = previous
 
 
-def run(search: SearchFn = storage.search_stories) -> list[QueryResult]:
-    """Run every query in both forms against the corpus using the given search function."""
-    queries = load_queries()
-    with isolated_store(load_corpus()):
+def searcher(mode: search.Mode) -> SearchFn:
+    return lambda query: search.search_stories(query, limit=EVAL_LIMIT, mode=mode)
+
+
+def run(
+    search_fn: SearchFn,
+    corpus: list[dict[str, Any]] | None = None,
+    queries: list[Query] | None = None,
+) -> list[QueryResult]:
+    """Run every query in each form it has against the corpus, using the given search function."""
+    corpus = load_corpus() if corpus is None else corpus
+    queries = load_queries() if queries is None else queries
+    with isolated_store(corpus):
         return [
-            QueryResult(query=q, form=form, ranked_ids=tuple(s.id for s in search(q.text(form))))
+            QueryResult(query=q, form=form, ranked_ids=tuple(s.id for s in search_fn(text)))
             for form in FORMS
             for q in queries
+            if (text := q.text(form))
         ]
 
 
@@ -149,10 +168,13 @@ def summarize(results: Sequence[QueryResult]) -> Metrics:
 
 
 def summarize_by_form(results: Sequence[QueryResult]) -> dict[str, Metrics]:
-    return {form: summarize([r for r in results if r.form == form]) for form in FORMS}
+    """Metrics for each form that has results."""
+    by_form = {form: [r for r in results if r.form == form] for form in FORMS}
+    return {form: summarize(rs) for form, rs in by_form.items() if rs}
 
 
-def load_thresholds() -> dict[str, dict[str, float]]:
+def load_thresholds() -> dict[str, dict[str, dict[str, float]]]:
+    """Minimums by mode, then form, then metric."""
     return json.loads(THRESHOLDS_PATH.read_text(encoding="utf-8"))
 
 
@@ -179,11 +201,10 @@ def thresholds_from(by_form: dict[str, Metrics]) -> dict[str, dict[str, float]]:
     return {form: {k: conservative(k, v) for k, v in asdict(m).items()} for form, m in by_form.items()}
 
 
-def format_report(results: Sequence[QueryResult], verbose: bool = False) -> str:
+def format_report(results: Sequence[QueryResult], title: str, verbose: bool = False) -> str:
     by_form = summarize_by_form(results)
-    queries = len(results) // len(FORMS)
     lines = [
-        f"Retrieval eval: {queries} queries x {len(FORMS)} forms",
+        f"{title}: {len(results)} searches",
         "",
         f"{'form':<10} {'top1':>6} {'top3':>6} {'mrr':>6} {'rel@3':>6} {'empty':>6}",
     ]
@@ -199,29 +220,60 @@ def format_report(results: Sequence[QueryResult], verbose: bool = False) -> str:
     return "\n".join(lines)
 
 
+def _run_personal(mode: search.Mode, verbose: bool) -> int:
+    stories_path = storage.data_path()
+    if not PERSONAL_QUERIES_PATH.exists():
+        print(
+            f"No personal queries at {PERSONAL_QUERIES_PATH}.\n"
+            "Create it in the same format as evals/queries.json, labeling each question with the id of "
+            "your story that best answers it. The keywords form is optional."
+        )
+        return 1
+    corpus = load_corpus(stories_path) if stories_path.exists() else []
+    queries = load_queries(PERSONAL_QUERIES_PATH)
+    unknown = sorted({q.best for q in queries} - {s["id"] for s in corpus})
+    if unknown:
+        print(f"These labeled story ids aren't in {stories_path}: {', '.join(unknown)}")
+        return 1
+    results = run(searcher(mode), corpus=corpus, queries=queries)
+    print(format_report(results, f"Personal retrieval eval ({mode})", verbose=verbose))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--mode", choices=get_args(search.Mode), default="hybrid", help="search mode to evaluate")
     parser.add_argument("--verbose", action="store_true", help="list queries where the best story wasn't first")
     parser.add_argument(
         "--update-thresholds",
         action="store_true",
-        help="save the current results as the new minimums (only if none got worse)",
+        help="save the current results as this mode's new minimums (only if none got worse)",
     )
+    parser.add_argument("--personal", action="store_true", help="run data/eval_queries.json on your real stories")
     args = parser.parse_args(argv)
 
-    results = run()
-    by_form = summarize_by_form(results)
-    print(format_report(results, verbose=args.verbose))
+    if args.personal:
+        if args.update_thresholds:
+            parser.error("--personal results are never used as thresholds")
+        return _run_personal(args.mode, args.verbose)
 
-    failures = check_thresholds(by_form, load_thresholds())
+    results = run(searcher(args.mode))
+    by_form = summarize_by_form(results)
+    print(format_report(results, f"Retrieval eval ({args.mode})", verbose=args.verbose))
+
+    all_thresholds = load_thresholds()
+    if args.mode not in all_thresholds:
+        print(f"\nNo thresholds for mode {args.mode!r}, so nothing to check.")
+        failures = []
+    else:
+        failures = check_thresholds(by_form, all_thresholds[args.mode])
     if failures:
         print("\nWorse than thresholds:\n  " + "\n  ".join(failures))
         return 1
     if args.update_thresholds:
-        THRESHOLDS_PATH.write_text(
-            json.dumps(thresholds_from(by_form), indent=2) + "\n", encoding="utf-8", newline="\n"
-        )
-        print(f"\nUpdated {THRESHOLDS_PATH.name}")
+        all_thresholds[args.mode] = thresholds_from(by_form)
+        THRESHOLDS_PATH.write_text(json.dumps(all_thresholds, indent=2) + "\n", encoding="utf-8", newline="\n")
+        print(f"\nUpdated {args.mode} thresholds in {THRESHOLDS_PATH.name}")
     return 0
 
 

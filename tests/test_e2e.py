@@ -120,7 +120,13 @@ async def test_crud_round_trip(client: Client, stories_path: Path) -> None:
 
     listed = _data(await client.call_tool("list_stories"))
     assert listed == [
-        {"id": story_id, "title": "Missed launch", "tags": ["failure", "ownership"], "needs_learning": False}
+        {
+            "id": story_id,
+            "title": "Missed launch",
+            "tags": ["failure", "ownership"],
+            "summary": "Team of five, launch slipped a week. Shipped two weeks later with no further slips.",
+            "needs_learning": False,
+        }
     ]
 
     fetched = _data(await client.call_tool("get_story", {"story_id": story_id}))
@@ -171,14 +177,42 @@ async def test_needs_learning_is_described_in_output_schema(client: Client) -> N
 # --- Robustness and known bugs, through the MCP protocol ----------------------
 
 
-@pytest.mark.xfail(strict=True, reason="Bug: search only matches the whole query as one exact substring")
-async def test_natural_language_search_finds_story(client: Client) -> None:
-    args = STORY_ARGS | {"tags": ["conflict"], "action": "I sat down with my peer to work it out."}
-    added = _data(await client.call_tool("add_story", args))
+async def test_natural_language_search_ranks_the_right_story_first(client: Client) -> None:
+    peer = _data(
+        await client.call_tool(
+            "add_story",
+            STORY_ARGS
+            | {
+                "title": "Settling an API design dispute",
+                "tags": ["collaboration"],
+                "situation": "Another senior engineer and I had opposite views on the design.",
+            },
+        )
+    )
+    await client.call_tool(
+        "add_story",
+        STORY_ARGS | {"title": "Faster builds", "tags": ["initiative"], "situation": "CI took forty minutes."},
+    )
 
-    found = _data(await client.call_tool("search_stories", {"query": "conflict with a peer"}))
+    found = _data(
+        await client.call_tool("search_stories", {"query": "Tell me about a time you disagreed with a coworker."})
+    )
 
-    assert [s["id"] for s in found] == [added["id"]]
+    assert found[0]["id"] == peer["id"]
+    assert set(found[0]) >= set(STAR_L_FIELDS)
+
+
+async def test_search_limit_is_bounded_and_respected(client: Client) -> None:
+    for i in range(3):
+        await client.call_tool("add_story", STORY_ARGS | {"title": f"Story {i}"})
+    tools = {t.name: t for t in (await client.list_tools()).tools}
+    limit_schema = tools["search_stories"].input_schema["properties"]["limit"]
+
+    assert (limit_schema["minimum"], limit_schema["maximum"], limit_schema["default"]) == (1, 20, 5)
+    assert len(_data(await client.call_tool("search_stories", {"query": "launch", "limit": 2}))) == 2
+    result = await client.call_tool("search_stories", {"query": "   "})
+    assert result.is_error
+    assert "query can't be blank" in _text(result)
 
 
 async def test_record_with_unknown_key_does_not_break_listing(client: Client, stories_path: Path) -> None:

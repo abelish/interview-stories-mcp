@@ -181,26 +181,6 @@ def get_story(story_id: str) -> Story | None:
     return None
 
 
-def search_stories(query: str) -> list[Story]:
-    query_lower = query.lower()
-    matches = []
-    for story in list_stories():
-        haystack = " ".join(
-            [
-                story.title,
-                " ".join(story.tags),
-                story.situation,
-                story.task,
-                story.action,
-                story.result,
-                story.learning,
-            ]
-        ).lower()
-        if query_lower in haystack:
-            matches.append(story)
-    return matches
-
-
 def add_story(
     title: str,
     tags: list[str],

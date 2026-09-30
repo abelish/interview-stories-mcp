@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 import os
 from collections import Counter
 from dataclasses import fields
+from pathlib import Path
 
 import pytest
 
 from evals import retrieval
 from evals.retrieval import Metrics, Query, QueryResult
 from stories import storage
+from stories.search import Mode
 
 # --- The eval dataset is well formed ------------------------------------------------
 
@@ -37,6 +40,7 @@ def test_query_ids_are_unique() -> None:
 @pytest.mark.parametrize("query", QUERIES, ids=lambda q: q.id)
 def test_query_labels_point_at_real_stories(query: Query) -> None:
     assert query.question.strip()
+    assert query.keywords is not None, "the committed eval set needs both forms"
     assert query.keywords.strip()
     assert query.best in STORY_IDS
     assert set(query.acceptable) <= STORY_IDS
@@ -121,21 +125,87 @@ def test_isolated_store_restores_stories_path(monkeypatch: pytest.MonkeyPatch) -
     assert os.environ["STORIES_PATH"] == "original"
 
 
+# --- Running the eval ------------------------------------------------------------------
+
+
+def test_queries_without_keywords_only_run_the_question_form() -> None:
+    corpus = [c for c in CORPUS if c["id"] == "mentoring-junior"]
+    queries = [Query(id="q", question="Tell me about someone you mentored.", keywords=None, best="mentoring-junior",
+                     acceptable=())]  # fmt: skip
+
+    results = retrieval.run(retrieval.searcher("keyword"), corpus=corpus, queries=queries)
+
+    assert [(r.form, r.best_rank) for r in results] == [("question", 1)]
+    assert set(retrieval.summarize_by_form(results)) == {"question"}
+
+
+def _write_json(path: Path, data: object) -> None:
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_personal_eval_explains_how_to_start_when_no_queries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(retrieval, "PERSONAL_QUERIES_PATH", tmp_path / "eval_queries.json")
+
+    assert retrieval.main(["--personal", "--mode", "keyword"]) == 1
+    assert "No personal queries" in capsys.readouterr().out
+
+
+def test_personal_eval_rejects_labels_for_unknown_stories(
+    tmp_path: Path, stories_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    queries_path = tmp_path / "eval_queries.json"
+    _write_json(queries_path, [{"id": "q", "question": "Tell me about a mentee.", "best": "no-such-story"}])
+    monkeypatch.setattr(retrieval, "PERSONAL_QUERIES_PATH", queries_path)
+
+    assert retrieval.main(["--personal", "--mode", "keyword"]) == 1
+    assert "no-such-story" in capsys.readouterr().out
+
+
+def test_personal_eval_scores_real_stories_without_changing_them(
+    tmp_path: Path, stories_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_json(stories_path, [c for c in CORPUS if c["id"] in {"mentoring-junior", "faster-ci"}])
+    before = stories_path.read_bytes()
+    queries_path = tmp_path / "eval_queries.json"
+    query = {"id": "q", "question": "Tell me about someone you mentored.", "best": "mentoring-junior"}
+    _write_json(queries_path, [query])
+    monkeypatch.setattr(retrieval, "PERSONAL_QUERIES_PATH", queries_path)
+
+    assert retrieval.main(["--personal", "--mode", "keyword"]) == 0
+
+    out = capsys.readouterr().out
+    assert "Personal retrieval eval (keyword): 1 searches" in out
+    assert "question    1.000" in out
+    assert stories_path.read_bytes() == before
+
+
+def test_personal_eval_refuses_to_update_thresholds() -> None:
+    with pytest.raises(SystemExit):
+        retrieval.main(["--personal", "--update-thresholds"])
+
+
 # --- The gate: search quality must not regress ---------------------------------------
 
 
-def test_thresholds_cover_every_form_and_metric() -> None:
+def test_thresholds_cover_every_gated_mode_form_and_metric() -> None:
     metric_names = {f.name for f in fields(Metrics)}
+    thresholds = retrieval.load_thresholds()
 
-    assert {form: set(limits) for form, limits in retrieval.load_thresholds().items()} == {
-        form: metric_names for form in retrieval.FORMS
-    }
+    assert set(thresholds) == set(retrieval.GATED_MODES)
+    for mode, by_form in thresholds.items():
+        assert {form: set(limits) for form, limits in by_form.items()} == {
+            form: metric_names for form in retrieval.FORMS
+        }, mode
 
 
-def test_search_meets_retrieval_thresholds() -> None:
-    results = retrieval.run()
+@pytest.mark.parametrize("mode", retrieval.GATED_MODES)
+def test_search_meets_retrieval_thresholds(mode: Mode) -> None:
+    results = retrieval.run(retrieval.searcher(mode))
     by_form = retrieval.summarize_by_form(results)
 
-    failures = retrieval.check_thresholds(by_form, retrieval.load_thresholds())
+    failures = retrieval.check_thresholds(by_form, retrieval.load_thresholds()[mode])
 
-    assert failures == [], "\n" + retrieval.format_report(results) + "\n" + "\n".join(failures)
+    report = retrieval.format_report(results, f"Retrieval eval ({mode})")
+    assert failures == [], "\n".join(["", report, *failures])

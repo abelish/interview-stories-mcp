@@ -11,6 +11,7 @@ wheels/
 
 # Personal story data - keep data/stories.example.json as the tracked template
 data/stories.json
+data/eval_queries.json
 
 # Lock and in-progress temp files next to the stories file
 data/*.lock

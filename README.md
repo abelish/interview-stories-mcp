@@ -63,9 +63,9 @@ Add to `claude_desktop_config.json`:
 
 ## Tools
 
-- `list_stories()` — id, title, tags, and whether the learning is missing, for every story
+- `list_stories()` — id, title, tags, a one-line summary, and whether the learning is missing, for every story
 - `get_story(story_id)` — full STAR-L text for one story
-- `search_stories(query)` — keyword search across title, tags, and STAR-L text
+- `search_stories(query, limit=5)` — the stories that best fit an interview question, best first
 - `add_story(title, tags, situation, task, action, result, learning)`
 - `update_story(story_id, ...)` — update any subset of fields
 - `delete_story(story_id)`
@@ -74,6 +74,28 @@ The title and every STAR-L part are required and can't be blank. Surrounding
 whitespace is trimmed. Tags are lowercased and hyphenated, so
 "Conflict Resolution" and "conflict_resolution" are both stored as
 `conflict-resolution`, and every story needs at least one.
+
+## Search
+
+`search_stories` combines two rankings:
+
+- **Keyword** (BM25): matches words, with tags counting most, then the title,
+  then the STAR-L text. Words are stemmed, and interview boilerplate like
+  "tell me about a time" is ignored.
+- **Semantic**: matches meaning using a small local embedding model
+  ([bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5), 67 MB),
+  so "a coworker" finds a story about "a fellow senior engineer".
+
+The model downloads once, on the server's first start, to
+`~/.cache/interview-stories-mcp` (set `STORIES_MODEL_CACHE` to change it) and
+runs offline after that. If it can't load, search falls back to keyword-only
+and retries a minute later.
+
+The approach was chosen with a retrieval eval: 52 labeled interview questions
+against 21 synthetic stories (`evals/`). To check search against your own
+stories, write questions labeled with your story ids in
+`data/eval_queries.json` (same format as `evals/queries.json`, with
+`keywords` optional) and run `uv run python -m evals.retrieval --personal`.
 
 ## Development
 
