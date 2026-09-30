@@ -130,8 +130,15 @@ def test_isolated_store_restores_stories_path(monkeypatch: pytest.MonkeyPatch) -
 
 def test_queries_without_keywords_only_run_the_question_form() -> None:
     corpus = [c for c in CORPUS if c["id"] == "mentoring-junior"]
-    queries = [Query(id="q", question="Tell me about someone you mentored.", keywords=None, best="mentoring-junior",
-                     acceptable=())]  # fmt: skip
+    queries = [
+        Query(
+            id="q",
+            question="Tell me about someone you mentored.",
+            keywords=None,
+            best="mentoring-junior",
+            acceptable=(),
+        )
+    ]
 
     results = retrieval.run(retrieval.searcher("keyword"), corpus=corpus, queries=queries)
 

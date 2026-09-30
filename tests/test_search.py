@@ -201,8 +201,18 @@ def test_semantic_index_returns_none_when_model_fails_and_retries_later(monkeypa
 
 
 def _story(story_id: str) -> Story:
-    return Story(id=story_id, title="", tags=[], situation="", task="", action="", result="", learning="",
-                 created_at="", updated_at="")  # fmt: skip
+    return Story(
+        id=story_id,
+        title="",
+        tags=[],
+        situation="",
+        task="",
+        action="",
+        result="",
+        learning="",
+        created_at="",
+        updated_at="",
+    )
 
 
 def test_fuse_rewards_stories_ranked_high_in_either_list() -> None:

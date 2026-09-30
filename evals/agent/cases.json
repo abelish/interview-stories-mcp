@@ -1,0 +1,145 @@
+[
+  {
+    "id": "capture-rambling",
+    "tags": ["capture", "complete-story"],
+    "store": "empty",
+    "message": "ok so I want to save a story. so, um, last year at my old job I was on the platform team, and our on-call was a nightmare, like people were getting paged five, six times a night, and half the alerts were noise. nobody owned fixing it because everyone was busy with features. so I kind of took it on myself. I pulled three months of paging data, grouped the alerts by source, and found like 70 percent came from four noisy checks. I rewrote those four, deleted a bunch of duplicate ones, and set up a weekly review where whoever was on call could flag bad alerts. after about two months pages went from like 40 a week to under 10, and people stopped dreading on-call. the thing I took away is that alert fatigue is a people problem as much as a technical one, and next time I'd set up that weekly review on day one instead of doing a big cleanup first.",
+    "expect": {"saves": true}
+  },
+  {
+    "id": "capture-out-of-order",
+    "tags": ["capture", "complete-story"],
+    "store": "empty",
+    "message": "Can you add this one to my stories? We ended up closing a $2M enterprise deal that had been stuck for a quarter, and honestly what I learned is that security reviews go faster when engineering joins the call directly instead of answering questionnaires by email. Context: I was a solutions engineer, and the customer's security team had sent us a 300-question questionnaire that had been bouncing back and forth for weeks. My job was to get us through their security review. I set up two live sessions with their security team and our infrastructure lead, answered the open questions on the spot, and wrote up a summary they could take to their CISO.",
+    "expect": {"saves": true}
+  },
+  {
+    "id": "capture-terse",
+    "tags": ["capture", "complete-story"],
+    "store": "empty",
+    "message": "Save this: Situation - our mobile app's crash rate spiked to 4% after a release. Task - I was the release owner. Action - I rolled back, bisected the crash to a third-party SDK update, pinned the version, and added a crash-rate gate to our release checklist. Result - crash rate back under 0.5% within a day, and the gate has caught two bad releases since. Learning - never let third-party SDKs float to new versions without a canary.",
+    "expect": {"saves": true}
+  },
+  {
+    "id": "capture-no-learning",
+    "tags": ["capture", "missing-learning"],
+    "store": "empty",
+    "message": "Please save this story. I was leading a small team building an internal reporting tool. Two weeks before the deadline, our data engineer quit. I had to make sure the tool still shipped. I took over the data pipeline work myself, cut two low-priority reports from scope, and asked a colleague from another team to review my SQL. We shipped on time with eight of the ten planned reports, and the remaining two followed a month later.",
+    "expect": {"saves": true, "learning_empty": true}
+  },
+  {
+    "id": "capture-duplicate",
+    "tags": ["capture", "duplicate"],
+    "store": "corpus",
+    "message": "Add a story: I led the rebuild of our mobile checkout flow with five engineers. We had a public launch date for the holiday campaign. I kept reporting green while integration testing slipped, and only raised the risk three weeks out. We cut scope and launched eight days late. I learned to report risk as soon as I see it.",
+    "expect": {"saves": false}
+  },
+
+  {
+    "id": "find-disagree-boss",
+    "tags": ["find", "easy"],
+    "store": "corpus",
+    "message": "I have an interview tomorrow and I'm expecting: \"Tell me about a time you disagreed with your boss.\" Which of my stories should I use?",
+    "expect": {"best": "pushback-on-roadmap", "acceptable": ["disagree-and-commit"]}
+  },
+  {
+    "id": "find-influence",
+    "tags": ["find", "easy"],
+    "store": "corpus",
+    "message": "Which story should I tell for \"Give me an example of influencing people without formal authority\"?",
+    "expect": {"best": "logging-standard-influence", "acceptable": ["four-team-migration"]}
+  },
+  {
+    "id": "find-failure",
+    "tags": ["find", "medium"],
+    "store": "corpus",
+    "message": "They always ask \"Tell me about a time you failed.\" What's my best story for that?",
+    "expect": {"best": "missed-launch", "acceptable": ["caused-outage", "data-changed-direction"]}
+  },
+  {
+    "id": "find-coworker",
+    "tags": ["find", "hard-for-search"],
+    "store": "corpus",
+    "message": "Help me pick a story for this question: \"Tell me about a time you disagreed with a coworker.\"",
+    "expect": {"best": "api-design-peer", "acceptable": ["hard-feedback-to-teammate"]}
+  },
+  {
+    "id": "find-broke-something",
+    "tags": ["find", "hard-for-search"],
+    "store": "corpus",
+    "message": "My interviewer likes the question \"What's the biggest thing you've ever broken at work?\" Do I have a story for it?",
+    "expect": {"best": "caused-outage", "acceptable": []}
+  },
+  {
+    "id": "find-weakness",
+    "tags": ["find", "hard-for-search"],
+    "store": "corpus",
+    "message": "How should I answer \"What's a weakness you've worked to improve?\" using one of my stories?",
+    "expect": {"best": "receiving-criticism", "acceptable": []}
+  },
+  {
+    "id": "find-unfamiliar-tech",
+    "tags": ["find", "hard-for-search"],
+    "store": "corpus",
+    "message": "Which of my stories fits \"Describe working with a technology you didn't know\"?",
+    "expect": {"best": "learned-rust-fast", "acceptable": []}
+  },
+
+  {
+    "id": "gaps-fill",
+    "tags": ["gaps", "no-content-given"],
+    "store": "corpus-missing-learning",
+    "message": "Some of my stories are missing the learning part. Can you help me fill them in?",
+    "expect": {"missing": ["mentoring-junior", "learned-rust-fast", "faster-ci"], "updates": {}}
+  },
+  {
+    "id": "gaps-which",
+    "tags": ["gaps", "no-content-given"],
+    "store": "corpus-missing-learning",
+    "message": "Which of my stories are incomplete?",
+    "expect": {"missing": ["mentoring-junior", "learned-rust-fast", "faster-ci"], "updates": {}}
+  },
+  {
+    "id": "gaps-user-provides",
+    "tags": ["gaps", "content-given"],
+    "store": "corpus-missing-learning",
+    "message": "For my Rust story, the learning is: learning fast comes from a tight feedback loop and a friendly expert, and small reviewable changes let me learn safely in production code. Please add that.",
+    "expect": {"missing": [], "updates": {"learned-rust-fast": "tight feedback loop"}}
+  },
+
+  {
+    "id": "none-budget",
+    "tags": ["no-fit"],
+    "store": "corpus",
+    "message": "Which of my stories should I use for \"Tell me about a time you managed a large budget\"?",
+    "expect": {"best": null}
+  },
+  {
+    "id": "none-fired",
+    "tags": ["no-fit"],
+    "store": "corpus",
+    "message": "I need a story for \"Tell me about a time you had to fire someone.\" What do I have?",
+    "expect": {"best": null}
+  },
+  {
+    "id": "none-relocation",
+    "tags": ["no-fit"],
+    "store": "corpus",
+    "message": "Pick one of my stories for \"Describe a time you relocated to a new country for work.\"",
+    "expect": {"best": null}
+  },
+  {
+    "id": "none-sales-quota",
+    "tags": ["no-fit"],
+    "store": "corpus",
+    "message": "Which story fits \"Tell me about a time you exceeded your sales quota\"?",
+    "expect": {"best": null}
+  },
+  {
+    "id": "none-hiring",
+    "tags": ["no-fit"],
+    "store": "corpus",
+    "message": "What story should I tell for \"Walk me through how you built a team from scratch through hiring\"?",
+    "expect": {"best": null}
+  }
+]

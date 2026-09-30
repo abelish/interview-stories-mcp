@@ -16,3 +16,9 @@ data/eval_queries.json
 # Lock and in-progress temp files next to the stories file
 data/*.lock
 data/.*.tmp
+
+# Agent eval output: bulky or regenerated from results.jsonl
+.claude/hillclimb/**/traces/
+.claude/hillclimb/**/report.html
+.claude/hillclimb/**/state.json
+.claude/hillclimb/**/trajectory/
