@@ -11,6 +11,8 @@ personal content. `data/stories.example.json` shows the schema — copy it to
 `data/stories.json` to start, or just call `add_story` once the server is
 running and it'll create the file.
 
+Set the `STORIES_PATH` environment variable to store stories somewhere else.
+
 ## Setup
 
 ```
@@ -60,3 +62,14 @@ Add to `claude_desktop_config.json`:
 - `add_story(title, tags, situation, task, action, result)`
 - `update_story(story_id, ...)` — update any subset of fields
 - `delete_story(story_id)`
+
+## Development
+
+```
+uv run pytest        # unit tests plus end-to-end tests that drive server.py over stdio
+uv run ruff check .
+uv run ruff format .
+uv run pyright
+```
+
+Tests always point `STORIES_PATH` at a temp file, so they never touch your real stories.

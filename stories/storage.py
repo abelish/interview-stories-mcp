@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "stories.json"
+DEFAULT_DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "stories.json"
+
+
+def data_path() -> Path:
+    """Where stories are stored. Override with the STORIES_PATH env var."""
+    override = os.environ.get("STORIES_PATH")
+    return Path(override) if override else DEFAULT_DATA_PATH
 
 
 @dataclass
@@ -23,19 +30,21 @@ class Story:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _load_raw() -> list[dict]:
-    if not DATA_PATH.exists():
+    path = data_path()
+    if not path.exists():
         return []
-    with DATA_PATH.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def _save_raw(stories: list[dict]) -> None:
-    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with DATA_PATH.open("w", encoding="utf-8") as f:
+    path = data_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
         json.dump(stories, f, indent=2, ensure_ascii=False)
         f.write("\n")
 

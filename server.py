@@ -26,7 +26,10 @@ def get_story(story_id: str) -> dict:
 
 @mcp.tool()
 def search_stories(query: str) -> list[dict]:
-    """Search stories by keyword across title, tags, and STAR text. Useful for finding a story that fits a scenario like 'conflict with a peer' or 'missed deadline'."""
+    """Search stories by keyword across title, tags, and STAR text.
+
+    Useful for finding a story that fits a scenario like 'conflict with a peer' or 'missed deadline'.
+    """
     return [dataclasses.asdict(s) for s in storage.search_stories(query)]
 
 
@@ -39,7 +42,10 @@ def add_story(
     action: str,
     result: str,
 ) -> dict:
-    """Save a new interview story in STAR format. Tags should name the scenarios it covers, e.g. ["conflict", "leadership", "failure", "ambiguity"]."""
+    """Save a new interview story in STAR format.
+
+    Tags should name the scenarios it covers, e.g. ["conflict", "leadership", "failure", "ambiguity"].
+    """
     story = storage.add_story(title, tags, situation, task, action, result)
     return dataclasses.asdict(story)
 
