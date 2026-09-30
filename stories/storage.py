@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import time
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,11 +22,21 @@ LOCK_TIMEOUT_SECONDS = 10.0
 REPLACE_ATTEMPTS = 6
 REPLACE_BACKOFF_SECONDS = 0.05
 
-_TEXT_FIELDS = ("title", "situation", "task", "action", "result", "learning", "created_at", "updated_at")
+_CONTENT_FIELDS = ("title", "situation", "task", "action", "result", "learning")
+_TEXT_FIELDS = (*_CONTENT_FIELDS, "created_at", "updated_at")
+_TAG_SEPARATORS = re.compile(r"[\s_-]+")
 
 
-class StoriesFileError(Exception):
-    """The stories file can't be locked, read, or parsed. The message is safe to show the user."""
+class StoryError(Exception):
+    """Base for storage errors. The message is safe to show the user."""
+
+
+class StoriesFileError(StoryError):
+    """The stories file can't be locked, read, or parsed."""
+
+
+class InvalidStoryError(StoryError):
+    """A story field is blank or otherwise invalid."""
 
 
 def data_path() -> Path:
@@ -123,6 +134,25 @@ def _replace_with_retry(src: Path, dst: Path) -> None:
             time.sleep(REPLACE_BACKOFF_SECONDS * 2**attempt)
 
 
+def _clean_text(field: str, value: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise InvalidStoryError(f"{field} can't be blank.")
+    return cleaned
+
+
+def normalize_tags(tags: list[str]) -> list[str]:
+    """Lowercase, hyphenate spaces and underscores, and drop blanks and duplicates, keeping order.
+
+    "Conflict Resolution", "conflict_resolution", and "conflict-resolution" all become "conflict-resolution".
+    """
+    cleaned = (_TAG_SEPARATORS.sub("-", tag.strip().lower()).strip("-") for tag in tags)
+    unique = list(dict.fromkeys(tag for tag in cleaned if tag))
+    if not unique:
+        raise InvalidStoryError("tags needs at least one tag naming a scenario the story covers.")
+    return unique
+
+
 def _to_story(raw: dict[str, Any]) -> Story:
     """Build a Story from a stored record, tolerating hand edits.
 
@@ -183,29 +213,54 @@ def add_story(
     now = _now()
     story = Story(
         id=str(uuid.uuid4()),
-        title=title,
-        tags=tags,
-        situation=situation,
-        task=task,
-        action=action,
-        result=result,
-        learning=learning,
+        title=_clean_text("title", title),
+        tags=normalize_tags(tags),
+        situation=_clean_text("situation", situation),
+        task=_clean_text("task", task),
+        action=_clean_text("action", action),
+        result=_clean_text("result", result),
+        learning=_clean_text("learning", learning),
         created_at=now,
         updated_at=now,
     )
     with _locked() as path:
         stories = _load(path)
-        stories.append(story.__dict__)
+        stories.append(asdict(story))
         _save(path, stories)
     return story
 
 
-def update_story(story_id: str, **fields: object) -> Story | None:
+def update_story(
+    story_id: str,
+    *,
+    title: str | None = None,
+    tags: list[str] | None = None,
+    situation: str | None = None,
+    task: str | None = None,
+    action: str | None = None,
+    result: str | None = None,
+    learning: str | None = None,
+) -> Story | None:
+    """Change the given fields, leaving the rest alone. Returns None if there's no such story."""
+    given = {
+        "title": title,
+        "situation": situation,
+        "task": task,
+        "action": action,
+        "result": result,
+        "learning": learning,
+    }
+    changes: dict[str, Any] = {field: _clean_text(field, v) for field, v in given.items() if v is not None}
+    if tags is not None:
+        changes["tags"] = normalize_tags(tags)
+    if not changes:
+        raise InvalidStoryError("Nothing to update. Give at least one field to change.")
+
     with _locked() as path:
         stories = _load(path)
         for s in stories:
             if s["id"] == story_id:
-                s.update({k: v for k, v in fields.items() if v is not None})
+                s.update(changes)
                 s["updated_at"] = _now()
                 _save(path, stories)
                 return _to_story(s)

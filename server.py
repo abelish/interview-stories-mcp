@@ -11,14 +11,17 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from stories import storage
-from stories.storage import StoriesFileError, Story
+from stories.storage import Story, StoryError
 
 mcp = MCPServer("interview-stories")
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 TITLE = "A short, memorable name for the story."
-TAGS = 'The interview scenarios the story covers, e.g. ["conflict", "leadership", "failure", "ambiguity"].'
+TAGS = (
+    'The interview scenarios the story covers, e.g. ["conflict", "leadership", "failure", "ambiguity"]. '
+    'Tags are stored lowercase with hyphens, so "Conflict Resolution" becomes "conflict-resolution".'
+)
 SITUATION = "The context: the team, the project, and what was at stake."
 TASK = "What you specifically were responsible for."
 ACTION = "The concrete steps you took, in first person."
@@ -41,14 +44,14 @@ def tool(fn: F) -> F:
     """Register fn as an MCP tool.
 
     Publishes its docstring without source indentation, and reports storage problems (like a
-    malformed stories file) to the client instead of as a generic crash.
+    blank field or a malformed stories file) to the client instead of as a generic crash.
     """
 
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return fn(*args, **kwargs)
-        except StoriesFileError as exc:
+        except StoryError as exc:
             raise ToolError(str(exc)) from exc
 
     mcp.tool(description=inspect.cleandoc(fn.__doc__ or ""))(wrapper)
@@ -92,13 +95,13 @@ def search_stories(query: str) -> list[Story]:
 
 @tool
 def add_story(
-    title: Annotated[str, Field(description=TITLE)],
-    tags: Annotated[list[str], Field(description=TAGS)],
-    situation: Annotated[str, Field(description=SITUATION)],
-    task: Annotated[str, Field(description=TASK)],
-    action: Annotated[str, Field(description=ACTION)],
-    result: Annotated[str, Field(description=RESULT)],
-    learning: Annotated[str, Field(description=LEARNING)],
+    title: Annotated[str, Field(description=TITLE, min_length=1)],
+    tags: Annotated[list[str], Field(description=TAGS, min_length=1)],
+    situation: Annotated[str, Field(description=SITUATION, min_length=1)],
+    task: Annotated[str, Field(description=TASK, min_length=1)],
+    action: Annotated[str, Field(description=ACTION, min_length=1)],
+    result: Annotated[str, Field(description=RESULT, min_length=1)],
+    learning: Annotated[str, Field(description=LEARNING, min_length=1)],
 ) -> Story:
     """Save a new interview story in STAR-L format: situation, task, action, result, learning."""
     return storage.add_story(title, tags, situation, task, action, result, learning)
@@ -107,15 +110,18 @@ def add_story(
 @tool
 def update_story(
     story_id: str,
-    title: Annotated[str | None, Field(description=TITLE)] = None,
-    tags: Annotated[list[str] | None, Field(description=TAGS)] = None,
-    situation: Annotated[str | None, Field(description=SITUATION)] = None,
-    task: Annotated[str | None, Field(description=TASK)] = None,
-    action: Annotated[str | None, Field(description=ACTION)] = None,
-    result: Annotated[str | None, Field(description=RESULT)] = None,
-    learning: Annotated[str | None, Field(description=LEARNING)] = None,
+    title: Annotated[str | None, Field(description=TITLE, min_length=1)] = None,
+    tags: Annotated[list[str] | None, Field(description=TAGS, min_length=1)] = None,
+    situation: Annotated[str | None, Field(description=SITUATION, min_length=1)] = None,
+    task: Annotated[str | None, Field(description=TASK, min_length=1)] = None,
+    action: Annotated[str | None, Field(description=ACTION, min_length=1)] = None,
+    result: Annotated[str | None, Field(description=RESULT, min_length=1)] = None,
+    learning: Annotated[str | None, Field(description=LEARNING, min_length=1)] = None,
 ) -> Story:
-    """Update one or more STAR-L fields on an existing story. Omit any field you don't want to change."""
+    """Update one or more STAR-L fields on an existing story.
+
+    Omit any field you don't want to change. Fields can't be set to blank.
+    """
     story = storage.update_story(
         story_id,
         title=title,

@@ -227,3 +227,42 @@ async def test_two_servers_writing_at_once_keep_every_story(stories_path: Path) 
 
     titles = {s["title"] for s in json.loads(stories_path.read_text(encoding="utf-8"))}
     assert titles == {f"{server} {i}" for server in "AB" for i in range(per_server)}
+
+
+# --- Validation through the MCP protocol ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "message"),
+    [
+        ("add_story", STORY_ARGS | {"task": ""}, "String should have at least 1 character"),
+        ("add_story", STORY_ARGS | {"task": "   "}, "task can't be blank"),
+        ("add_story", STORY_ARGS | {"tags": []}, "List should have at least 1 item"),
+        ("add_story", STORY_ARGS | {"tags": [" ", "_"]}, "at least one tag"),
+        ("update_story", {"story_id": "any"}, "Nothing to update"),
+        ("update_story", {"story_id": "any", "learning": "  "}, "learning can't be blank"),
+    ],
+)
+async def test_invalid_input_is_a_clear_tool_error(
+    client: Client, stories_path: Path, tool: str, args: dict[str, Any], message: str
+) -> None:
+    result = await client.call_tool(tool, args)
+
+    assert result.is_error
+    assert message in _text(result)
+    assert not stories_path.exists()
+
+
+async def test_text_fields_publish_min_length(client: Client) -> None:
+    tools = {t.name: t for t in (await client.list_tools()).tools}
+    add_props = tools["add_story"].input_schema["properties"]
+
+    for field in (*STAR_L_FIELDS, "title"):
+        assert add_props[field]["minLength"] == 1, field
+    assert add_props["tags"]["minItems"] == 1
+
+
+async def test_tags_are_normalized_through_mcp(client: Client) -> None:
+    added = _data(await client.call_tool("add_story", STORY_ARGS | {"tags": ["Team Conflict", "team_conflict"]}))
+
+    assert added["tags"] == ["team-conflict"]
