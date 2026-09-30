@@ -6,7 +6,8 @@
     "situation": "Describe the context: team, project, and what was at stake.",
     "task": "Describe what you specifically were responsible for.",
     "action": "Describe the concrete steps you took, in your own voice.",
-    "result": "Describe the measurable outcome and what you'd do differently.",
+    "result": "Describe the measurable outcome.",
+    "learning": "Describe what you took away and what you'd do differently next time.",
     "created_at": "2026-01-01T00:00:00+00:00",
     "updated_at": "2026-01-01T00:00:00+00:00"
   }

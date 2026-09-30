@@ -1,7 +1,7 @@
 [project]
 name = "interview-stories-mcp"
 version = "0.1.0"
-description = "MCP server for storing and retrieving STAR-format interview stories"
+description = "MCP server for storing and retrieving STAR-L-format interview stories"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

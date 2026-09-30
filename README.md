@@ -1,8 +1,8 @@
 # interview-stories-mcp
 
-An MCP server for storing interview stories in STAR format (situation, task,
-action, result) and retrieving them by keyword or scenario during interview
-prep.
+An MCP server for storing interview stories in STAR-L format (situation, task,
+action, result, learning) and retrieving them by keyword or scenario during
+interview prep.
 
 ## Storage
 
@@ -56,10 +56,10 @@ Add to `claude_desktop_config.json`:
 
 ## Tools
 
-- `list_stories()` — id, title, tags for every story
-- `get_story(story_id)` — full STAR text for one story
-- `search_stories(query)` — keyword search across title, tags, and STAR text
-- `add_story(title, tags, situation, task, action, result)`
+- `list_stories()` — id, title, tags, and whether the learning is missing, for every story
+- `get_story(story_id)` — full STAR-L text for one story
+- `search_stories(query)` — keyword search across title, tags, and STAR-L text
+- `add_story(title, tags, situation, task, action, result, learning)`
 - `update_story(story_id, ...)` — update any subset of fields
 - `delete_story(story_id)`
 

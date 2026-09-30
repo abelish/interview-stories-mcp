@@ -18,6 +18,8 @@ def data_path() -> Path:
 
 @dataclass
 class Story:
+    """An interview story in STAR-L format: situation, task, action, result, learning."""
+
     id: str
     title: str
     tags: list[str]
@@ -25,6 +27,7 @@ class Story:
     task: str
     action: str
     result: str
+    learning: str
     created_at: str
     updated_at: str
 
@@ -49,14 +52,19 @@ def _save_raw(stories: list[dict]) -> None:
         f.write("\n")
 
 
+def _to_story(raw: dict) -> Story:
+    # Records saved before STAR-L have no learning. Load them with an empty one so it can be filled in.
+    return Story(**{"learning": "", **raw})
+
+
 def list_stories() -> list[Story]:
-    return [Story(**s) for s in _load_raw()]
+    return [_to_story(s) for s in _load_raw()]
 
 
 def get_story(story_id: str) -> Story | None:
     for s in _load_raw():
         if s["id"] == story_id:
-            return Story(**s)
+            return _to_story(s)
     return None
 
 
@@ -65,14 +73,30 @@ def search_stories(query: str) -> list[Story]:
     matches = []
     for s in _load_raw():
         haystack = " ".join(
-            [s["title"], " ".join(s["tags"]), s["situation"], s["task"], s["action"], s["result"]]
+            [
+                s["title"],
+                " ".join(s["tags"]),
+                s["situation"],
+                s["task"],
+                s["action"],
+                s["result"],
+                s.get("learning", ""),
+            ]
         ).lower()
         if query_lower in haystack:
-            matches.append(Story(**s))
+            matches.append(_to_story(s))
     return matches
 
 
-def add_story(title: str, tags: list[str], situation: str, task: str, action: str, result: str) -> Story:
+def add_story(
+    title: str,
+    tags: list[str],
+    situation: str,
+    task: str,
+    action: str,
+    result: str,
+    learning: str,
+) -> Story:
     stories = _load_raw()
     now = _now()
     story = Story(
@@ -83,6 +107,7 @@ def add_story(title: str, tags: list[str], situation: str, task: str, action: st
         task=task,
         action=action,
         result=result,
+        learning=learning,
         created_at=now,
         updated_at=now,
     )
@@ -98,7 +123,7 @@ def update_story(story_id: str, **fields: object) -> Story | None:
             s.update({k: v for k, v in fields.items() if v is not None})
             s["updated_at"] = _now()
             _save_raw(stories)
-            return Story(**s)
+            return _to_story(s)
     return None
 
 

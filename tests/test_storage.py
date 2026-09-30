@@ -14,6 +14,7 @@ def _add(title: str = "Missed launch", tags: list[str] | None = None) -> storage
         task="I owned the release plan.",
         action="I reset expectations with stakeholders and cut scope.",
         result="Shipped two weeks later with no further slips.",
+        learning="Flag schedule risk the day it appears, not the day it lands.",
     )
 
 
@@ -103,3 +104,53 @@ def test_unicode_round_trips(stories_path: Path) -> None:
 
     assert storage.get_story(story.id) == story
     assert "Café" in stories_path.read_text(encoding="utf-8")
+
+
+def test_add_persists_learning(stories_path: Path) -> None:
+    story = _add()
+
+    on_disk = json.loads(stories_path.read_text(encoding="utf-8"))
+    assert on_disk[0]["learning"] == story.learning
+    assert storage.get_story(story.id) == story
+
+
+def test_update_changes_learning() -> None:
+    story = _add()
+
+    updated = storage.update_story(story.id, learning="Over-communicate early.")
+
+    assert updated is not None
+    assert updated.learning == "Over-communicate early."
+    assert updated.result == story.result
+
+
+def test_search_matches_learning() -> None:
+    story = _add()
+
+    assert [s.id for s in storage.search_stories("schedule risk")] == [story.id]
+
+
+def test_record_saved_before_star_l_loads_with_empty_learning(stories_path: Path) -> None:
+    legacy = {
+        "id": "legacy",
+        "title": "Old story",
+        "tags": ["conflict"],
+        "situation": "s",
+        "task": "t",
+        "action": "a",
+        "result": "r",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    stories_path.write_text(json.dumps([legacy]), encoding="utf-8")
+
+    story = storage.get_story("legacy")
+    assert story is not None
+    assert story.learning == ""
+    assert [s.id for s in storage.list_stories()] == ["legacy"]
+    assert [s.id for s in storage.search_stories("conflict")] == ["legacy"]
+
+    updated = storage.update_story("legacy", learning="Now filled in.")
+    assert updated is not None
+    assert updated.learning == "Now filled in."
+    assert json.loads(stories_path.read_text(encoding="utf-8"))[0]["learning"] == "Now filled in."

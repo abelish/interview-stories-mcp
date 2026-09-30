@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -48,7 +49,10 @@ STORY_ARGS = {
     "task": "I owned the release plan.",
     "action": "I reset expectations with stakeholders and cut scope.",
     "result": "Shipped two weeks later with no further slips.",
+    "learning": "Flag schedule risk the day it appears, not the day it lands.",
 }
+
+STAR_L_FIELDS = ("situation", "task", "action", "result", "learning")
 
 
 async def test_exposes_expected_tools(client: Client) -> None:
@@ -66,7 +70,7 @@ async def test_exposes_expected_tools(client: Client) -> None:
 
 async def test_story_tools_publish_typed_output_schemas(client: Client) -> None:
     tools = {t.name: t for t in (await client.list_tools()).tools}
-    story_fields = {"id", "title", "tags", "situation", "task", "action", "result", "created_at", "updated_at"}
+    story_fields = {"id", "title", "tags", *STAR_L_FIELDS, "created_at", "updated_at"}
 
     for name in ("get_story", "add_story", "update_story"):
         schema = tools[name].output_schema
@@ -78,13 +82,48 @@ async def test_story_tools_publish_typed_output_schemas(client: Client) -> None:
     assert list_schema["properties"]["result"]["type"] == "array"
 
 
+async def test_add_story_requires_and_describes_every_star_l_part(client: Client) -> None:
+    tools = {t.name: t for t in (await client.list_tools()).tools}
+    add_schema = tools["add_story"].input_schema
+    update_schema = tools["update_story"].input_schema
+
+    assert set(STAR_L_FIELDS) <= set(add_schema["required"])
+    for field in STAR_L_FIELDS:
+        assert add_schema["properties"][field]["description"], field
+        assert update_schema["properties"][field]["description"], field
+        assert field not in update_schema.get("required", []), field
+
+
+async def test_tool_descriptions_say_star_l(client: Client) -> None:
+    tools = {t.name: t for t in (await client.list_tools()).tools}
+
+    for name in ("list_stories", "get_story", "search_stories", "add_story", "update_story"):
+        description = tools[name].description or ""
+        assert "STAR-L" in description, name
+
+
+async def test_missing_learning_is_flagged_and_can_be_filled(client: Client, stories_path: Path) -> None:
+    legacy = {k: v for k, v in STORY_ARGS.items() if k != "learning"}
+    legacy |= {"id": "legacy", "created_at": "2026-01-01T00:00:00+00:00", "updated_at": "2026-01-01T00:00:00+00:00"}
+    stories_path.write_text(json.dumps([legacy]), encoding="utf-8")
+
+    listed = _data(await client.call_tool("list_stories"))
+    assert listed[0]["needs_learning"] is True
+    assert _data(await client.call_tool("get_story", {"story_id": "legacy"}))["learning"] == ""
+
+    await client.call_tool("update_story", {"story_id": "legacy", "learning": "Now filled in."})
+    assert _data(await client.call_tool("list_stories"))[0]["needs_learning"] is False
+
+
 async def test_crud_round_trip(client: Client, stories_path: Path) -> None:
     added = _data(await client.call_tool("add_story", STORY_ARGS))
     story_id = added["id"]
     assert stories_path.exists()
 
     listed = _data(await client.call_tool("list_stories"))
-    assert listed == [{"id": story_id, "title": "Missed launch", "tags": ["failure", "ownership"]}]
+    assert listed == [
+        {"id": story_id, "title": "Missed launch", "tags": ["failure", "ownership"], "needs_learning": False}
+    ]
 
     fetched = _data(await client.call_tool("get_story", {"story_id": story_id}))
     assert fetched == added
@@ -114,3 +153,18 @@ async def test_unknown_id_is_a_tool_error(client: Client, tool: str, args: dict[
 
     assert result.is_error
     assert "No story with id 'missing'" in _text(result)
+
+
+async def test_tool_descriptions_have_no_source_indentation(client: Client) -> None:
+    for tool in (await client.list_tools()).tools:
+        description = tool.description or ""
+        assert description == description.strip(), tool.name
+        assert "\n    " not in description, tool.name
+
+
+async def test_needs_learning_is_described_in_output_schema(client: Client) -> None:
+    tools = {t.name: t for t in (await client.list_tools()).tools}
+    schema = tools["list_stories"].output_schema
+    assert schema is not None
+
+    assert schema["$defs"]["StorySummary"]["properties"]["needs_learning"]["description"]

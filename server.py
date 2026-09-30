@@ -1,14 +1,31 @@
 from __future__ import annotations
 
+import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Annotated, Any, TypeVar
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field
 
 from stories import storage
 from stories.storage import Story
 
 mcp = MCPServer("interview-stories")
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+TITLE = "A short, memorable name for the story."
+TAGS = 'The interview scenarios the story covers, e.g. ["conflict", "leadership", "failure", "ambiguity"].'
+SITUATION = "The context: the team, the project, and what was at stake."
+TASK = "What you specifically were responsible for."
+ACTION = "The concrete steps you took, in first person."
+RESULT = "The outcome, measurable where possible."
+LEARNING = (
+    "What you took away from the experience and what you'd do differently next time. "
+    "Keep this distinct from the result."
+)
 
 
 @dataclass
@@ -16,6 +33,12 @@ class StorySummary:
     id: str
     title: str
     tags: list[str]
+    needs_learning: Annotated[bool, Field(description="True when the story has no learning yet.")]
+
+
+def tool(fn: F) -> F:
+    """Register fn as an MCP tool, publishing its docstring without source indentation."""
+    return mcp.tool(description=inspect.cleandoc(fn.__doc__ or ""))(fn)
 
 
 def _not_found(story_id: str) -> ToolError:
@@ -23,57 +46,62 @@ def _not_found(story_id: str) -> ToolError:
     return ToolError(f"No story with id {story_id!r}")
 
 
-@mcp.tool()
+@tool
 def list_stories() -> list[StorySummary]:
-    """List all saved interview stories with id, title, and tags (not the full STAR text)."""
-    return [StorySummary(id=s.id, title=s.title, tags=s.tags) for s in storage.list_stories()]
+    """List all saved interview stories with id, title, and tags (not the full STAR-L text).
+
+    needs_learning is true for stories that are missing their learning.
+    """
+    return [
+        StorySummary(id=s.id, title=s.title, tags=s.tags, needs_learning=not s.learning.strip())
+        for s in storage.list_stories()
+    ]
 
 
-@mcp.tool()
+@tool
 def get_story(story_id: str) -> Story:
-    """Get the full STAR (situation/task/action/result) text of one story by id."""
+    """Get the full STAR-L (situation/task/action/result/learning) text of one story by id."""
     story = storage.get_story(story_id)
     if story is None:
         raise _not_found(story_id)
     return story
 
 
-@mcp.tool()
+@tool
 def search_stories(query: str) -> list[Story]:
-    """Search stories by keyword across title, tags, and STAR text.
+    """Search stories by keyword across title, tags, and STAR-L text.
 
     Useful for finding a story that fits a scenario like 'conflict with a peer' or 'missed deadline'.
     """
     return storage.search_stories(query)
 
 
-@mcp.tool()
+@tool
 def add_story(
-    title: str,
-    tags: list[str],
-    situation: str,
-    task: str,
-    action: str,
-    result: str,
+    title: Annotated[str, Field(description=TITLE)],
+    tags: Annotated[list[str], Field(description=TAGS)],
+    situation: Annotated[str, Field(description=SITUATION)],
+    task: Annotated[str, Field(description=TASK)],
+    action: Annotated[str, Field(description=ACTION)],
+    result: Annotated[str, Field(description=RESULT)],
+    learning: Annotated[str, Field(description=LEARNING)],
 ) -> Story:
-    """Save a new interview story in STAR format.
-
-    Tags should name the scenarios it covers, e.g. ["conflict", "leadership", "failure", "ambiguity"].
-    """
-    return storage.add_story(title, tags, situation, task, action, result)
+    """Save a new interview story in STAR-L format: situation, task, action, result, learning."""
+    return storage.add_story(title, tags, situation, task, action, result, learning)
 
 
-@mcp.tool()
+@tool
 def update_story(
     story_id: str,
-    title: str | None = None,
-    tags: list[str] | None = None,
-    situation: str | None = None,
-    task: str | None = None,
-    action: str | None = None,
-    result: str | None = None,
+    title: Annotated[str | None, Field(description=TITLE)] = None,
+    tags: Annotated[list[str] | None, Field(description=TAGS)] = None,
+    situation: Annotated[str | None, Field(description=SITUATION)] = None,
+    task: Annotated[str | None, Field(description=TASK)] = None,
+    action: Annotated[str | None, Field(description=ACTION)] = None,
+    result: Annotated[str | None, Field(description=RESULT)] = None,
+    learning: Annotated[str | None, Field(description=LEARNING)] = None,
 ) -> Story:
-    """Update one or more fields on an existing story. Omit any field you don't want to change."""
+    """Update one or more STAR-L fields on an existing story. Omit any field you don't want to change."""
     story = storage.update_story(
         story_id,
         title=title,
@@ -82,13 +110,14 @@ def update_story(
         task=task,
         action=action,
         result=result,
+        learning=learning,
     )
     if story is None:
         raise _not_found(story_id)
     return story
 
 
-@mcp.tool()
+@tool
 def delete_story(story_id: str) -> str:
     """Delete a story by id."""
     if not storage.delete_story(story_id):
