@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import anyio
 import pytest
 from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters
@@ -20,15 +21,18 @@ ROOT = Path(__file__).resolve().parent.parent
 pytestmark = pytest.mark.anyio
 
 
-@pytest.fixture
-async def client(stories_path: Path) -> AsyncIterator[Client]:
-    params = StdioServerParameters(
+def _server_params(stories_path: Path) -> StdioServerParameters:
+    return StdioServerParameters(
         command=sys.executable,
         args=[str(ROOT / "server.py")],
         env={"STORIES_PATH": str(stories_path)},
         cwd=ROOT,
     )
-    async with Client(params, read_timeout_seconds=30) as c:
+
+
+@pytest.fixture
+async def client(stories_path: Path) -> AsyncIterator[Client]:
+    async with Client(_server_params(stories_path), read_timeout_seconds=30) as c:
         yield c
 
 
@@ -164,7 +168,7 @@ async def test_needs_learning_is_described_in_output_schema(client: Client) -> N
     assert schema["$defs"]["StorySummary"]["properties"]["needs_learning"]["description"]
 
 
-# --- Known bugs, reproduced through the MCP protocol ----------------------------
+# --- Robustness and known bugs, through the MCP protocol ----------------------
 
 
 @pytest.mark.xfail(strict=True, reason="Bug: search only matches the whole query as one exact substring")
@@ -177,7 +181,6 @@ async def test_natural_language_search_finds_story(client: Client) -> None:
     assert [s["id"] for s in found] == [added["id"]]
 
 
-@pytest.mark.xfail(strict=True, reason="Bug: one record with an unknown key breaks every tool")
 async def test_record_with_unknown_key_does_not_break_listing(client: Client, stories_path: Path) -> None:
     record = STORY_ARGS | {"id": "rec", "notes": "added by hand", "created_at": "x", "updated_at": "x"}
     stories_path.write_text(json.dumps([record]), encoding="utf-8")
@@ -187,7 +190,6 @@ async def test_record_with_unknown_key_does_not_break_listing(client: Client, st
     assert [s["id"] for s in listed] == ["rec"]
 
 
-@pytest.mark.xfail(strict=True, reason="Bug: malformed JSON reaches the client as a generic crash")
 async def test_malformed_file_is_reported_clearly(client: Client, stories_path: Path) -> None:
     stories_path.write_text("[{not json", encoding="utf-8")
 
@@ -196,3 +198,32 @@ async def test_malformed_file_is_reported_clearly(client: Client, stories_path: 
     assert result.is_error
     assert "not valid JSON" in _text(result)
     assert str(stories_path) in _text(result)
+
+
+async def test_unknown_keys_survive_an_update_through_mcp(client: Client, stories_path: Path) -> None:
+    record = STORY_ARGS | {"id": "rec", "notes": "added by hand", "created_at": "x", "updated_at": "x"}
+    stories_path.write_text(json.dumps([record]), encoding="utf-8")
+
+    updated = _data(await client.call_tool("update_story", {"story_id": "rec", "title": "Renamed"}))
+
+    assert updated["title"] == "Renamed"
+    assert "notes" not in updated
+    assert json.loads(stories_path.read_text(encoding="utf-8"))[0]["notes"] == "added by hand"
+
+
+async def test_two_servers_writing_at_once_keep_every_story(stories_path: Path) -> None:
+    """Like Claude Code and Claude Desktop each running the server against the same file."""
+    per_server = 15
+
+    async def add_many(server: str) -> None:
+        async with Client(_server_params(stories_path), read_timeout_seconds=30) as c:
+            for i in range(per_server):
+                result = await c.call_tool("add_story", STORY_ARGS | {"title": f"{server} {i}"})
+                assert not result.is_error, _text(result)
+
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(add_many, "A")
+        tg.start_soon(add_many, "B")
+
+    titles = {s["title"] for s in json.loads(stories_path.read_text(encoding="utf-8"))}
+    assert titles == {f"{server} {i}" for server in "AB" for i in range(per_server)}

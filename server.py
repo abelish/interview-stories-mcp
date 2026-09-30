@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import Field
 
 from stories import storage
-from stories.storage import Story
+from stories.storage import StoriesFileError, Story
 
 mcp = MCPServer("interview-stories")
 
@@ -37,8 +38,21 @@ class StorySummary:
 
 
 def tool(fn: F) -> F:
-    """Register fn as an MCP tool, publishing its docstring without source indentation."""
-    return mcp.tool(description=inspect.cleandoc(fn.__doc__ or ""))(fn)
+    """Register fn as an MCP tool.
+
+    Publishes its docstring without source indentation, and reports storage problems (like a
+    malformed stories file) to the client instead of as a generic crash.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return fn(*args, **kwargs)
+        except StoriesFileError as exc:
+            raise ToolError(str(exc)) from exc
+
+    mcp.tool(description=inspect.cleandoc(fn.__doc__ or ""))(wrapper)
+    return fn
 
 
 def _not_found(story_id: str) -> ToolError:

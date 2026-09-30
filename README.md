@@ -13,6 +13,13 @@ running and it'll create the file.
 
 Set the `STORIES_PATH` environment variable to store stories somewhere else.
 
+It's safe to run more than one server against the same file (for example Claude
+Code and Claude Desktop at once): every read and write holds a lock
+(`stories.json.lock`), and saves replace the file atomically, so a crash never
+leaves a half-written file. Hand edits are fine. Unknown keys are kept, and
+missing STAR-L parts load as empty. If the file isn't valid JSON, tools report
+where the problem is and never overwrite it.
+
 ## Setup
 
 ```
