@@ -33,6 +33,11 @@ LEARNING = (
     "What you took away from the experience and what you'd do differently next time. "
     "Keep this distinct from the result."
 )
+NEW_LEARNING = (
+    LEARNING + " Use only what the user actually said. If they haven't said what they learned, leave "
+    "this empty rather than inventing one: the story is saved with needs_learning, and you should "
+    "ask them for it."
+)
 QUERY = (
     "An interview question or scenario, as-is or as keywords, e.g. "
     "'Tell me about a time you disagreed with your manager' or 'conflict manager'."
@@ -135,9 +140,13 @@ def add_story(
     task: Annotated[str, Field(description=TASK, min_length=1)],
     action: Annotated[str, Field(description=ACTION, min_length=1)],
     result: Annotated[str, Field(description=RESULT, min_length=1)],
-    learning: Annotated[str, Field(description=LEARNING, min_length=1)],
+    learning: Annotated[str, Field(description=NEW_LEARNING)] = "",
 ) -> Story:
-    """Save a new interview story in STAR-L format: situation, task, action, result, learning."""
+    """Save a new interview story in STAR-L format: situation, task, action, result, learning.
+
+    Save as soon as the user has told the story, even if they haven't given a learning yet. Leave
+    learning empty in that case and ask for it, so the story isn't lost and nothing is made up.
+    """
     return storage.add_story(title, tags, situation, task, action, result, learning)
 
 

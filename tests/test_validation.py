@@ -10,18 +10,36 @@ from stories import storage
 from tests.helpers import add_story
 
 STAR_L_TEXT_FIELDS = ("title", "situation", "task", "action", "result", "learning")
+# Required when adding. Learning may be left for later, so a story is saved rather than lost.
+REQUIRED_ON_ADD = ("title", "situation", "task", "action", "result")
+BLANKS = ["", "   ", "\n\t "]
 
 
 # --- add_story -----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("field", STAR_L_TEXT_FIELDS)
-@pytest.mark.parametrize("blank", ["", "   ", "\n\t "])
+@pytest.mark.parametrize("field", REQUIRED_ON_ADD)
+@pytest.mark.parametrize("blank", BLANKS)
 def test_add_rejects_blank_text(field: str, blank: str, stories_path: Path) -> None:
     with pytest.raises(storage.InvalidStoryError, match=f"^{field} can't be blank"):
         add_story(**{field: blank})
 
     assert not stories_path.exists()
+
+
+@pytest.mark.parametrize("blank", BLANKS)
+def test_add_saves_a_draft_when_learning_is_blank(blank: str, stories_path: Path) -> None:
+    story = add_story(learning=blank)
+
+    assert story.learning == ""
+    assert storage.get_story(story.id) == story
+    assert json.loads(stories_path.read_text(encoding="utf-8"))[0]["learning"] == ""
+
+
+def test_add_saves_a_draft_when_learning_is_omitted() -> None:
+    story = storage.add_story(title="Missed launch", tags=["failure"], situation="s", task="t", action="a", result="r")
+
+    assert story.learning == ""
 
 
 def test_add_trims_outer_whitespace_but_keeps_line_breaks() -> None:

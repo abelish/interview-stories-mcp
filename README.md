@@ -70,10 +70,13 @@ Add to `claude_desktop_config.json`:
 - `update_story(story_id, ...)` — update any subset of fields
 - `delete_story(story_id)`
 
-The title and every STAR-L part are required and can't be blank. Surrounding
-whitespace is trimmed. Tags are lowercased and hyphenated, so
-"Conflict Resolution" and "conflict_resolution" are both stored as
-`conflict-resolution`, and every story needs at least one.
+The title and every STAR-L part except the learning are required and can't be
+blank. A story can be saved before its learning is known: it's flagged with
+`needs_learning` in `list_stories` so it can be filled in later, rather than
+being lost or having a learning made up. Surrounding whitespace is trimmed.
+Tags are lowercased and hyphenated, so "Conflict Resolution" and
+"conflict_resolution" are both stored as `conflict-resolution`, and every
+story needs at least one.
 
 ## Search
 

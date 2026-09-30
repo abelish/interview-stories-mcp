@@ -85,7 +85,9 @@ async def test_add_story_requires_and_describes_every_star_l_part(client: Client
     add_schema = tools["add_story"].input_schema
     update_schema = tools["update_story"].input_schema
 
-    assert set(STAR_L_FIELDS) <= set(add_schema["required"])
+    assert set(STAR_L_FIELDS) - {"learning"} <= set(add_schema["required"])
+    assert "learning" not in add_schema["required"]
+    assert "rather than inventing" in add_schema["properties"]["learning"]["description"]
     for field in STAR_L_FIELDS:
         assert add_schema["properties"][field]["description"], field
         assert update_schema["properties"][field]["description"], field
@@ -291,9 +293,20 @@ async def test_text_fields_publish_min_length(client: Client) -> None:
     tools = {t.name: t for t in (await client.list_tools()).tools}
     add_props = tools["add_story"].input_schema["properties"]
 
-    for field in (*STAR_L_FIELDS, "title"):
+    for field in ("title", "situation", "task", "action", "result"):
         assert add_props[field]["minLength"] == 1, field
+    assert "minLength" not in add_props["learning"]
     assert add_props["tags"]["minItems"] == 1
+
+
+async def test_story_without_learning_is_saved_and_flagged(client: Client) -> None:
+    args = {k: v for k, v in STORY_ARGS.items() if k != "learning"}
+
+    added = _data(await client.call_tool("add_story", args))
+
+    assert added["learning"] == ""
+    listed = _data(await client.call_tool("list_stories"))
+    assert [(s["id"], s["needs_learning"]) for s in listed] == [(added["id"], True)]
 
 
 async def test_tags_are_normalized_through_mcp(client: Client) -> None:

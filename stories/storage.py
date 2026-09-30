@@ -188,8 +188,13 @@ def add_story(
     task: str,
     action: str,
     result: str,
-    learning: str,
+    learning: str = "",
 ) -> Story:
+    """Save a new story. Every part is required except learning, which may be left for later.
+
+    A story saved without a learning shows up with needs_learning in list_stories, so it can be
+    filled in once the user says what they took away, instead of being invented or lost.
+    """
     now = _now()
     story = Story(
         id=str(uuid.uuid4()),
@@ -199,7 +204,7 @@ def add_story(
         task=_clean_text("task", task),
         action=_clean_text("action", action),
         result=_clean_text("result", result),
-        learning=_clean_text("learning", learning),
+        learning=learning.strip(),
         created_at=now,
         updated_at=now,
     )
