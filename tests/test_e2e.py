@@ -13,6 +13,8 @@ from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters
 from mcp_types import CallToolResult, TextContent
 
+from tests.helpers import STORY_FIELDS
+
 ROOT = Path(__file__).resolve().parent.parent
 
 pytestmark = pytest.mark.anyio
@@ -42,15 +44,7 @@ def _text(result: CallToolResult) -> str:
     return "\n".join(c.text for c in result.content if isinstance(c, TextContent))
 
 
-STORY_ARGS = {
-    "title": "Missed launch",
-    "tags": ["failure", "ownership"],
-    "situation": "Team of five, launch slipped a week.",
-    "task": "I owned the release plan.",
-    "action": "I reset expectations with stakeholders and cut scope.",
-    "result": "Shipped two weeks later with no further slips.",
-    "learning": "Flag schedule risk the day it appears, not the day it lands.",
-}
+STORY_ARGS = STORY_FIELDS
 
 STAR_L_FIELDS = ("situation", "task", "action", "result", "learning")
 
@@ -168,3 +162,37 @@ async def test_needs_learning_is_described_in_output_schema(client: Client) -> N
     assert schema is not None
 
     assert schema["$defs"]["StorySummary"]["properties"]["needs_learning"]["description"]
+
+
+# --- Known bugs, reproduced through the MCP protocol ----------------------------
+
+
+@pytest.mark.xfail(strict=True, reason="Bug: search only matches the whole query as one exact substring")
+async def test_natural_language_search_finds_story(client: Client) -> None:
+    args = STORY_ARGS | {"tags": ["conflict"], "action": "I sat down with my peer to work it out."}
+    added = _data(await client.call_tool("add_story", args))
+
+    found = _data(await client.call_tool("search_stories", {"query": "conflict with a peer"}))
+
+    assert [s["id"] for s in found] == [added["id"]]
+
+
+@pytest.mark.xfail(strict=True, reason="Bug: one record with an unknown key breaks every tool")
+async def test_record_with_unknown_key_does_not_break_listing(client: Client, stories_path: Path) -> None:
+    record = STORY_ARGS | {"id": "rec", "notes": "added by hand", "created_at": "x", "updated_at": "x"}
+    stories_path.write_text(json.dumps([record]), encoding="utf-8")
+
+    listed = _data(await client.call_tool("list_stories"))
+
+    assert [s["id"] for s in listed] == ["rec"]
+
+
+@pytest.mark.xfail(strict=True, reason="Bug: malformed JSON reaches the client as a generic crash")
+async def test_malformed_file_is_reported_clearly(client: Client, stories_path: Path) -> None:
+    stories_path.write_text("[{not json", encoding="utf-8")
+
+    result = await client.call_tool("list_stories")
+
+    assert result.is_error
+    assert "not valid JSON" in _text(result)
+    assert str(stories_path) in _text(result)

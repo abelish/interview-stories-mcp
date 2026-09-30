@@ -4,18 +4,7 @@ import json
 from pathlib import Path
 
 from stories import storage
-
-
-def _add(title: str = "Missed launch", tags: list[str] | None = None) -> storage.Story:
-    return storage.add_story(
-        title=title,
-        tags=tags if tags is not None else ["failure", "ownership"],
-        situation="Team of five, launch slipped a week.",
-        task="I owned the release plan.",
-        action="I reset expectations with stakeholders and cut scope.",
-        result="Shipped two weeks later with no further slips.",
-        learning="Flag schedule risk the day it appears, not the day it lands.",
-    )
+from tests.helpers import add_story as _add
 
 
 def test_data_path_honors_env_override(stories_path: Path) -> None:
@@ -53,8 +42,8 @@ def test_get_returns_story_or_none() -> None:
 
 
 def test_list_returns_all_in_insertion_order() -> None:
-    first = _add("First")
-    second = _add("Second")
+    first = _add(title="First")
+    second = _add(title="Second")
 
     assert [s.id for s in storage.list_stories()] == [first.id, second.id]
 
@@ -78,8 +67,8 @@ def test_update_missing_returns_none() -> None:
 
 
 def test_delete_removes_story() -> None:
-    keep = _add("Keep")
-    drop = _add("Drop")
+    keep = _add(title="Keep")
+    drop = _add(title="Drop")
 
     assert storage.delete_story(drop.id) is True
     assert [s.id for s in storage.list_stories()] == [keep.id]
