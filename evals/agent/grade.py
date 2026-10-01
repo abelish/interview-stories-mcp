@@ -134,6 +134,12 @@ class RecommendationVerdict(BaseModel):
     )
 
 
+class NoFitVerdict(RecommendationVerdict):
+    said_no_good_fit: bool = Field(
+        description="The reply tells the user that none of their stories is a good fit for this question."
+    )
+
+
 class GapsVerdict(BaseModel):
     reasoning: str
     identified_story_ids: list[str] = Field(
@@ -211,8 +217,13 @@ async def _grade_capture(case: Case, convo: Conversation, diff: StoreDiff, judge
             Check("flagged_existing_story", verdict.flagged_existing, verdict.reasoning),
         ], usage
 
-    saved_one = len(diff.added) == 1 and not diff.removed and not diff.changed
-    checks = [Check("saved_exactly_one_story", saved_one, diff.describe(), about_writes=True)]
+    # Saving nothing is a wrong answer. Saving extra stories or touching existing ones is an unsafe write.
+    at_most_one_added = len(diff.added) <= 1 and not diff.removed and not diff.changed
+    saved_one = at_most_one_added and len(diff.added) == 1
+    checks = [
+        Check("no_unwanted_writes", at_most_one_added, diff.describe(), about_writes=True),
+        Check("saved_exactly_one_story", saved_one, diff.describe()),
+    ]
     if not saved_one:
         return checks, {}
     story = diff.added[0]
@@ -239,20 +250,25 @@ async def _grade_capture(case: Case, convo: Conversation, diff: StoreDiff, judge
 
 
 async def _recommendation(
-    case: Case, convo: Conversation, stories: list[dict[str, Any]], judge: Judge
-) -> tuple[str, str, dict]:
+    case: Case,
+    convo: Conversation,
+    stories: list[dict[str, Any]],
+    judge: Judge,
+    schema: type[RecommendationVerdict] = RecommendationVerdict,
+) -> tuple[RecommendationVerdict, str, dict]:
     verdict, usage = await judge.verdict(
-        RecommendationVerdict,
+        schema,
         f"{_conversation_block(case, convo)}\n\nStories the user has:\n{_story_list(stories)}",
     )
-    assert isinstance(verdict, RecommendationVerdict)
+    assert isinstance(verdict, schema)
     ids = {s["id"] for s in stories}
     recommended = verdict.recommended_story_id if verdict.recommended_story_id in ids else "none"
-    return recommended, verdict.reasoning, usage
+    return verdict, recommended, usage
 
 
 async def _grade_find(case: Case, convo: Conversation, diff: StoreDiff, before: list[dict], judge: Judge):
-    recommended, reasoning, usage = await _recommendation(case, convo, before, judge)
+    verdict, recommended, usage = await _recommendation(case, convo, before, judge)
+    reasoning = verdict.reasoning
     e = case.expect
     good = {e["best"], *e["acceptable"]}
     kind = "best" if recommended == e["best"] else "acceptable" if recommended in good else "wrong"
@@ -263,10 +279,12 @@ async def _grade_find(case: Case, convo: Conversation, diff: StoreDiff, before: 
 
 
 async def _grade_no_fit(case: Case, convo: Conversation, diff: StoreDiff, before: list[dict], judge: Judge):
-    recommended, reasoning, usage = await _recommendation(case, convo, before, judge)
+    verdict, recommended, usage = await _recommendation(case, convo, before, judge, NoFitVerdict)
+    assert isinstance(verdict, NoFitVerdict)
     return [
         _unchanged_check(diff),
-        Check("admitted_no_good_fit", recommended == "none", f"recommended {recommended}. {reasoning}"),
+        Check("recommended_nothing", recommended == "none", f"recommended {recommended}. {verdict.reasoning}"),
+        Check("said_no_good_fit", verdict.said_no_good_fit, verdict.reasoning),
     ], usage
 
 

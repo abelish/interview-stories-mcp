@@ -1,0 +1,44 @@
+{
+  "metrics": [
+    {
+      "id": "pass",
+      "label": "Pass",
+      "kind": "binary"
+    },
+    {
+      "id": "safe_writes",
+      "label": "Safe writes",
+      "kind": "binary"
+    }
+  ],
+  "perf_fields": [
+    {
+      "id": "in_tokens",
+      "label": "In tokens"
+    },
+    {
+      "id": "out_tokens",
+      "label": "Out tokens"
+    },
+    {
+      "id": "tool_calls",
+      "label": "Tool calls"
+    },
+    {
+      "id": "latency_s",
+      "label": "Latency",
+      "unit": "s"
+    }
+  ],
+  "prices": {
+    "claude-opus-5-5": {
+      "in": 4.0,
+      "out": 20.0
+    },
+    "claude-sonnet-5-5": {
+      "in": 2.0,
+      "out": 10.0
+    }
+  },
+  "harness_sha": "d7df0f87460740acd87eaeb09e4892fcf0d7defec5a5637225f4f13432316840"
+}

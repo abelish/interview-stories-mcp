@@ -22,6 +22,7 @@ from evals.agent.grade import (
     CaptureVerdict,
     DuplicateVerdict,
     GapsVerdict,
+    NoFitVerdict,
     RecommendationVerdict,
     diff_stores,
 )
@@ -75,7 +76,9 @@ class FakeJudge:
         return self.decide(schema, prompt), {"input_tokens": 50, "output_tokens": 5}
 
 
-def approving_judge(recommend: str = "none", identified: list[str] | None = None) -> FakeJudge:
+def approving_judge(
+    recommend: str = "none", identified: list[str] | None = None, said_no_good_fit: bool = True
+) -> FakeJudge:
     def decide(schema: type[BaseModel], prompt: str) -> BaseModel:
         if schema is CaptureVerdict:
             return CaptureVerdict(reasoning="ok", parts_placed=True, faithful=True, asked_for_learning=True)
@@ -83,6 +86,8 @@ def approving_judge(recommend: str = "none", identified: list[str] | None = None
             return DuplicateVerdict(reasoning="ok", flagged_existing=True)
         if schema is RecommendationVerdict:
             return RecommendationVerdict(reasoning="ok", recommended_story_id=recommend)
+        if schema is NoFitVerdict:
+            return NoFitVerdict(reasoning="ok", recommended_story_id=recommend, said_no_good_fit=said_no_good_fit)
         return GapsVerdict(reasoning="ok", identified_story_ids=identified or [])
 
     return FakeJudge(decide)
@@ -207,8 +212,21 @@ async def test_capture_oracle_passes_and_null_fails(tmp_path: Path) -> None:
     null = await run_case(case, ScriptedModel([text("")]), approving_judge(), tmp_path)
 
     assert oracle.scores == {"pass": 1.0, "safe_writes": 1.0}
-    assert null.scores["pass"] == 0.0
-    assert "saved_exactly_one_story" in null.explanation["pass"]
+    # Not saving is a wrong answer, not an unsafe write.
+    assert null.scores == {"pass": 0.0, "safe_writes": 1.0}
+    assert "FAIL saved_exactly_one_story" in null.explanation["pass"]
+
+
+async def test_capture_saving_extra_stories_is_an_unsafe_write(tmp_path: Path) -> None:
+    model = ScriptedModel(
+        [tool("add_story", STORY, "t1"), tool("add_story", {**STORY, "title": "A second copy"}, "t2")],
+        [text("Saved.")],
+    )
+
+    judged = await run_case(CASES["capture-terse"], model, approving_judge(), tmp_path)
+
+    assert judged.scores == {"pass": 0.0, "safe_writes": 0.0}
+    assert "FAIL no_unwanted_writes: added 2" in judged.explanation["safe_writes"]
 
 
 async def test_capture_without_learning_fails_if_a_learning_is_saved(tmp_path: Path) -> None:
@@ -272,9 +290,13 @@ async def test_no_fit_passes_only_when_nothing_is_recommended(tmp_path: Path) ->
     case = CASES["none-budget"]
     admitted = await run_case(case, ScriptedModel([text("None fits.")]), approving_judge("none"), tmp_path)
     stretched = await run_case(case, ScriptedModel([text("Use this.")]), approving_judge("faster-ci"), tmp_path)
+    silent = await run_case(case, ScriptedModel([text("")]), approving_judge(said_no_good_fit=False), tmp_path)
 
     assert admitted.scores["pass"] == 1.0
     assert stretched.scores["pass"] == 0.0
+    # Recommending nothing isn't enough: the reply has to tell the user nothing fits.
+    assert silent.scores["pass"] == 0.0
+    assert "FAIL said_no_good_fit" in silent.explanation["pass"]
 
 
 async def test_gaps_requires_exactly_the_missing_stories(tmp_path: Path) -> None:
