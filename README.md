@@ -106,11 +106,106 @@ The model downloads once, on the server's first start, to
 runs offline after that. If it can't load, search falls back to keyword-only
 and retries a minute later.
 
-The approach was chosen with a retrieval eval: 52 labeled interview questions
-against 21 synthetic stories (`evals/`). To check search against your own
-stories, write questions labeled with your story ids in
-`data/eval_queries.json` (same format as `evals/queries.json`, with
-`keywords` optional) and run `uv run python -m evals.retrieval --personal`.
+The approach was chosen with the retrieval eval (see [Evals](#evals)).
+
+## Evals
+
+Two evals live in `evals/`. The retrieval eval checks search on its own, is
+free, and runs with the tests. The agent eval checks Claude using the tools
+end to end, costs money, and is run by hand.
+
+Both use the same 21 synthetic stories (`evals/corpus.json`), written to
+overlap the way a real story bank does: three stories about disagreeing, two
+about failing, and so on.
+
+### Retrieval eval
+
+52 interview questions, each labeled with the story that best answers it and
+any acceptable alternatives (`evals/queries.json`). Each is searched twice:
+as asked, and rewritten as keywords. No LLM is involved, so results are the
+same on every run.
+
+It reports, for each form:
+
+- **top1**: the best story is ranked first
+- **top3**: the best story is in the top 3
+- **mrr**: mean reciprocal rank of the best story (1 for first, 1/2 for second, ...)
+- **rel@3**: the best story or an acceptable one is in the top 3
+- **empty**: search returned nothing
+
+```
+uv run python -m evals.retrieval --verbose            # hybrid search, listing every miss
+uv run python -m evals.retrieval --mode keyword       # the keyword-only fallback
+uv run python -m evals.retrieval --update-thresholds  # ratchet the minimums up
+```
+
+It's also a quality gate. `evals/retrieval_thresholds.json` holds a minimum
+for every metric, for both hybrid and keyword-only search, and `pytest` fails
+if search falls below any of them. `--update-thresholds` raises them to the
+current results, and refuses if any metric got worse. Lowering one is
+deliberate: edit the file by hand and say why in the commit.
+
+To check search against your own stories, write questions labeled with your
+story ids in `data/eval_queries.json` (same format as `evals/queries.json`,
+with `keywords` optional) and run `uv run python -m evals.retrieval --personal`.
+It reports but never gates, and runs against a copy of your stories.
+
+### Agent eval
+
+20 cases, each one user message to Claude with this server connected and
+seeded with a set of stories. They cover four scenarios:
+
+- **capture**: saving a story the user tells, including one with no learning
+  and one already in the bank
+- **find**: picking the right story for an interview question
+- **gaps**: finding stories with no learning, without making one up
+- **no-fit**: saying honestly that no story fits
+
+`evals/agent/cases.md` lists every case and what passing means. To change the
+cases, edit `evals/agent/cases.json` and regenerate the list with
+`uv run python -m evals.agent.cases`.
+
+Each trial is graded on two scores:
+
+- **pass**: every check passed
+- **safe writes**: Claude didn't add, change, or delete stories it shouldn't
+  have. This separates "changed something it shouldn't" from "answered badly".
+
+Checks on what was written are done in code, by comparing the stories file
+before and after. Checks code can't make, like whether a saved story invents
+details or which story a reply recommends, go to a judge model, Claude Sonnet
+5.5. It sees the conversation as data and answers a fixed set of yes/no or
+pick-one questions.
+
+Defaults: Claude Opus 5.5 at medium effort, Sonnet 5.5 as judge, 1 rep. It
+needs `ANTHROPIC_API_KEY` set. A trial costs about $0.05, so all 20 cases at
+1 rep cost about $1 and take about a minute.
+
+```
+uv run python -m evals.agent.runner --approve-harness                # after reviewing harness changes
+uv run python -m evals.agent.runner                                  # every case, as the baseline
+uv run python -m evals.agent.runner --cases find-weakness,gaps-fill  # some cases
+uv run python -m evals.agent.runner --variant v1 --reps 3            # a later version, 3 reps each
+uv run python -m evals.agent.runner --summary                        # pass rates and cost so far
+```
+
+**Harness approval.** The runner refuses to start if the cases, the grading,
+or the runner itself changed since they were last approved, since a change
+there changes what the numbers mean. Review the change, then run
+`--approve-harness` yourself. The approval is recorded in
+`.claude/hillclimb/agent-tools/_state.json`, which is committed. Changes to
+the server and to search don't need approval: they're what's being measured.
+
+**Results** go to `.claude/hillclimb/agent-tools/<variant>/`. `results.jsonl`
+has one graded row per trial, with every check and its reason, and is
+committed so results can be compared later. Full conversation traces go to
+`traces/` (gitignored). Trials that fail for reasons that aren't Claude's,
+like an API error or a timeout, go to `errors.jsonl` and are never scored. A
+run picks up where it left off, so rerunning skips finished trials.
+
+Before trusting a change to grading, check it against conversations whose
+grade you already know: a correct one must pass, and an empty or wrong one
+must fail.
 
 ## Development
 
