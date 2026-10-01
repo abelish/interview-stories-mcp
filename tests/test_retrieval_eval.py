@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 import os
 from collections import Counter
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 import pytest
 
 from evals import retrieval
 from evals.retrieval import Metrics, Query, QueryResult
-from stories import storage
+from stories import search, storage
 from stories.search import Mode
 
 # --- The eval dataset is well formed ------------------------------------------------
@@ -216,3 +216,14 @@ def test_search_meets_retrieval_thresholds(mode: Mode) -> None:
 
     report = retrieval.format_report(results, f"Retrieval eval ({mode})")
     assert failures == [], "\n".join(["", report, *failures])
+
+
+# Questions where Claude searched once, didn't see the right story in the results, and told the user
+# none of their stories fit (agent eval baseline, find-* cases). The default limit is what Claude sees.
+@pytest.mark.parametrize("query_id", ["broke-something", "weakness", "unfamiliar-tech"])
+def test_hybrid_returns_the_best_story_within_the_default_limit(query_id: str) -> None:
+    [query] = [q for q in QUERIES if q.id == query_id]
+
+    [result] = retrieval.run(retrieval.searcher("hybrid"), queries=[replace(query, keywords=None)])
+
+    assert result.best_rank is not None and result.best_rank <= search.DEFAULT_LIMIT, result.ranked_ids

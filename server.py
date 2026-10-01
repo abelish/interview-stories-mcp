@@ -38,6 +38,10 @@ NEW_LEARNING = (
     "this empty rather than inventing one: the story is saved with needs_learning, and you should "
     "ask them for it."
 )
+ALLOW_DUPLICATE = (
+    "Leave false. Set true only after the user has confirmed they want this saved as a separate story "
+    "alongside a similar one already saved."
+)
 QUERY = (
     "An interview question or scenario, as-is or as keywords, e.g. "
     "'Tell me about a time you disagreed with your manager' or 'conflict manager'."
@@ -128,6 +132,10 @@ def search_stories(
     Matches meaning as well as keywords, so the interview question can be passed as-is. It returns
     the closest stories even when none is a good fit, so check that a result actually answers the
     question before using it.
+
+    The results are only the top matches, not every story the user has. Search can miss a story
+    that fits, especially when the question and the story share few words. Before telling the user
+    none of their stories fits, call list_stories and check the rest.
     """
     return search.search_stories(query, limit=limit)
 
@@ -141,13 +149,24 @@ def add_story(
     action: Annotated[str, Field(description=ACTION, min_length=1)],
     result: Annotated[str, Field(description=RESULT, min_length=1)],
     learning: Annotated[str, Field(description=NEW_LEARNING)] = "",
+    allow_duplicate: Annotated[bool, Field(description=ALLOW_DUPLICATE)] = False,
 ) -> Story:
     """Save a new interview story in STAR-L format: situation, task, action, result, learning.
 
     Save as soon as the user has told the story, even if they haven't given a learning yet. Leave
     learning empty in that case and ask for it, so the story isn't lost and nothing is made up.
+
+    If the story looks like one already saved, nothing is saved and the error names that story.
     """
-    return storage.add_story(title, tags, situation, task, action, result, learning)
+    try:
+        return storage.add_story(
+            title, tags, situation, task, action, result, learning, allow_duplicate=allow_duplicate
+        )
+    except storage.DuplicateStoryError as exc:
+        raise ToolError(
+            f"{exc} Nothing was saved. Ask the user whether to update that story with update_story, "
+            "keep both by calling add_story again with allow_duplicate=true, or skip it."
+        ) from exc
 
 
 @tool

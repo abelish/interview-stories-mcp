@@ -1,16 +1,16 @@
 {
   "hybrid": {
     "question": {
-      "top1": 0.576,
+      "top1": 0.673,
       "top3": 0.865,
-      "mrr": 0.717,
+      "mrr": 0.78,
       "relevant_top3": 0.923,
       "empty": 0.0
     },
     "keywords": {
-      "top1": 0.692,
-      "top3": 0.961,
-      "mrr": 0.815,
+      "top1": 0.826,
+      "top3": 0.942,
+      "mrr": 0.892,
       "relevant_top3": 0.961,
       "empty": 0.0
     }
@@ -18,15 +18,15 @@
   "keyword": {
     "question": {
       "top1": 0.576,
-      "top3": 0.769,
-      "mrr": 0.686,
+      "top3": 0.788,
+      "mrr": 0.688,
       "relevant_top3": 0.826,
       "empty": 0.02
     },
     "keywords": {
       "top1": 0.673,
       "top3": 0.865,
-      "mrr": 0.778,
+      "mrr": 0.779,
       "relevant_top3": 0.884,
       "empty": 0.0
     }

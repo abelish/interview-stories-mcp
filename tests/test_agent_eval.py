@@ -111,6 +111,16 @@ STORY = {
     "result": "Pages dropped from 40 to under 10 a week.",
     "learning": "Alert fatigue is a people problem as much as a technical one.",
 }
+# A different story, so the server doesn't refuse it as a duplicate of STORY.
+OTHER_STORY = {
+    "title": "Onboarding a new hire remotely",
+    "tags": ["mentoring"],
+    "situation": "A new engineer joined the team during a hiring freeze, fully remote.",
+    "task": "I volunteered to be their onboarding buddy.",
+    "action": "I paired with them daily for two weeks and wrote a setup guide as we went.",
+    "result": "They shipped their first feature in their third week.",
+    "learning": "Writing things down while onboarding someone helps everyone who comes after.",
+}
 
 
 # --- Cases file ------------------------------------------------------------------------------------------
@@ -219,7 +229,7 @@ async def test_capture_oracle_passes_and_null_fails(tmp_path: Path) -> None:
 
 async def test_capture_saving_extra_stories_is_an_unsafe_write(tmp_path: Path) -> None:
     model = ScriptedModel(
-        [tool("add_story", STORY, "t1"), tool("add_story", {**STORY, "title": "A second copy"}, "t2")],
+        [tool("add_story", STORY, "t1"), tool("add_story", OTHER_STORY, "t2")],
         [text("Saved.")],
     )
 

@@ -1,8 +1,8 @@
-"""Ranked story search: keyword (BM25F), semantic (local embeddings), and hybrid (both, fused).
+"""Ranked story search: keyword (BM25F), semantic (local embeddings), and hybrid (both, blended).
 
 Hybrid is the default. Keyword search matches words, with tags counting most, then the title, then
 the STAR-L text. Semantic search matches meaning, so "a coworker" finds a story about "a fellow senior
-engineer". Hybrid fuses both rankings. If the embedding model can't load (for example offline on
+engineer". Hybrid blends both scores. If the embedding model can't load (for example offline on
 first run), hybrid falls back to keyword search and retries the model later.
 
 The mode and model were chosen with the retrieval eval (evals/retrieval.py).
@@ -10,12 +10,10 @@ The mode and model were chosen with the retrieval eval (evals/retrieval.py).
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import logging
 import math
 import os
-import re
 import threading
 import time
 from collections import Counter
@@ -24,10 +22,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
 import numpy as np
-import snowballstemmer
 
 from stories import storage
 from stories.storage import InvalidStoryError, Story
+from stories.text import tokenize
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -48,40 +46,6 @@ FIELD_B = {"tags": 0.0, "title": 0.5, "body": 0.75}
 
 FIELD_WEIGHTS = {"tags": 3.0, "title": 2.0, "body": 1.0}
 
-# Common English words, plus words that appear in almost every interview question and say nothing
-# about which story fits ("Tell me about a time you...", "Describe a situation where...").
-STOPWORDS = frozenset(
-    """
-    a about above after again against all am an and any are as at be because been before being
-    below between both but by can could did do does doing down during each few for from further
-    had has have having he her here hers herself him himself his how i if in into is it its itself
-    just me more most my myself no nor not now of off on once only or other our ours ourselves out
-    over own same she should so some such than that the their theirs them themselves then there
-    these they this those through to too under until up very was we were what when where which
-    while who whom why will with would you your yours yourself yourselves
-    tell describe give example time times walk share situation ever
-    """.split()  # noqa: SIM905 - a word block is easier to read and edit than a long list
-)
-
-_WORD = re.compile(r"[^\W_]+", re.UNICODE)
-_stemmer = snowballstemmer.stemmer("english")
-
-
-# Stemming dominates search time and snowballstemmer doesn't cache, while the vocabulary is small
-# and repeats on every search. The lock is there because the stemmer object isn't thread safe.
-_stem_lock = threading.Lock()
-
-
-@functools.lru_cache(maxsize=100_000)
-def _stem(word: str) -> str:
-    with _stem_lock:
-        return _stemmer.stemWord(word)
-
-
-def tokenize(text: str) -> list[str]:
-    """Lowercase, split into words, drop stopwords, and stem."""
-    return [_stem(w) for w in _WORD.findall(text.lower()) if w not in STOPWORDS]
-
 
 def _fields(story: Story) -> dict[str, list[str]]:
     body = " ".join([story.situation, story.task, story.action, story.result, story.learning])
@@ -92,32 +56,49 @@ def _fields(story: Story) -> dict[str, list[str]]:
     }
 
 
-def keyword_rank(query: str, stories: Sequence[Story]) -> list[Story]:
-    """Stories matching any query word, best first. Ties keep the stories' original order."""
+def keyword_scores(query: str, stories: Sequence[Story]) -> list[float]:
+    """Each story's BM25F score as a share of the most the query could score, from 0 to 1.
+
+    Each query word adds at most its idf, so dividing by the sum of the query words' idfs measures how
+    much of the query a story matches, weighted by how rare each word is. A match on a word most stories
+    share stays small, instead of counting as much as a match on the word that picks out one story.
+    """
     terms = list(dict.fromkeys(tokenize(query)))
     if not terms or not stories:
-        return []
+        return [0.0] * len(stories)
 
     docs = [{field: Counter(tokens) for field, tokens in _fields(s).items()} for s in stories]
     lengths = [{field: sum(counts.values()) for field, counts in doc.items()} for doc in docs]
     avg_length = {field: max(sum(ln[field] for ln in lengths) / len(docs), 1e-9) for field in FIELD_WEIGHTS}
-    doc_freq = {term: sum(1 for d in docs if any(d[f][term] for f in FIELD_WEIGHTS)) for term in terms}
     n = len(docs)
+    idf = {}
+    for term in terms:
+        doc_freq = sum(1 for d in docs if any(d[f][term] for f in FIELD_WEIGHTS))
+        idf[term] = math.log(1 + (n - doc_freq + 0.5) / (doc_freq + 0.5))
+    most = sum(idf.values())
 
-    scored: list[tuple[float, Story]] = []
-    for story, doc, length in zip(stories, docs, lengths, strict=True):
+    scores = []
+    for doc, length in zip(docs, lengths, strict=True):
         score = 0.0
         for term in terms:
             weighted_tf = sum(
                 weight * doc[field][term] / (1 - FIELD_B[field] + FIELD_B[field] * length[field] / avg_length[field])
                 for field, weight in FIELD_WEIGHTS.items()
             )
-            if weighted_tf:
-                idf = math.log(1 + (n - doc_freq[term] + 0.5) / (doc_freq[term] + 0.5))
-                score += idf * weighted_tf / (K1 + weighted_tf)
-        if score > 0:
-            scored.append((score, story))
-    return [story for _, story in sorted(scored, key=lambda pair: -pair[0])]
+            score += idf[term] * weighted_tf / (K1 + weighted_tf)
+        scores.append(score / most)
+    return scores
+
+
+def _by_score(stories: Sequence[Story], scores: Sequence[float], keep_zero: bool = True) -> list[Story]:
+    """Stories by descending score. Ties keep the stories' original order."""
+    order = sorted(range(len(stories)), key=lambda i: (-scores[i], i))
+    return [stories[i] for i in order if keep_zero or scores[i] > 0]
+
+
+def keyword_rank(query: str, stories: Sequence[Story]) -> list[Story]:
+    """Stories matching any query word, best first. Ties keep the stories' original order."""
+    return _by_score(stories, keyword_scores(query, stories), keep_zero=False)
 
 
 # --- Semantic search (local embeddings) ---------------------------------------------------
@@ -187,11 +168,16 @@ class SemanticIndex:
 
     def rank(self, query: str, stories: Sequence[Story]) -> list[Story] | None:
         """All stories by similarity to the query, or None if the model isn't available."""
+        similarities = self.similarities(query, stories)
+        return None if similarities is None else _by_score(stories, similarities.tolist())
+
+    def similarities(self, query: str, stories: Sequence[Story]) -> NDArray[np.float32] | None:
+        """Each story's cosine similarity to the query, or None if the model isn't available."""
         embedder = self.embedder()
         if embedder is None:
             return None
         if not stories:
-            return []
+            return np.zeros(0, dtype=np.float32)
         keys = [hashlib.sha256(story_text(s).encode()).hexdigest() for s in stories]
         with self._lock:
             missing = [(k, s) for k, s in zip(keys, stories, strict=True) if k not in self._vectors]
@@ -201,9 +187,7 @@ class SemanticIndex:
             # Keep the cache to the current stories so edits and deletes don't accumulate.
             self._vectors = {k: self._vectors[k] for k in keys}
             matrix = np.stack([self._vectors[k] for k in keys])
-        similarities = matrix @ _unit(embedder.embed_query(query))
-        order = sorted(range(len(stories)), key=lambda i: (-float(similarities[i]), i))
-        return [stories[i] for i in order]
+        return matrix @ _unit(embedder.embed_query(query))
 
 
 _index = SemanticIndex()
@@ -216,22 +200,22 @@ def warm_up() -> None:
 
 # --- Hybrid ------------------------------------------------------------------------------
 
-# Reciprocal rank fusion constant. 60 is the standard value from the original RRF paper.
-RRF_K = 60
+# How much the keyword score counts against the semantic one. Equal weight, rather than a value tuned
+# to the retrieval eval's 52 queries, which would fit their noise.
+KEYWORD_WEIGHT = 0.5
 
 
-def fuse(*rankings: Sequence[Story]) -> list[Story]:
-    """Reciprocal rank fusion: a story ranked high in any list ranks high overall.
+def blend(keyword: Sequence[float], semantic: NDArray[np.float32]) -> NDArray[np.float64]:
+    """Combine keyword scores (0 to 1) with semantic similarities rescaled to 0 to 1 within the query.
 
-    Ties keep the order in which stories first appear across the rankings.
+    Scores, not ranks, are blended, so how strongly a story matches counts and not just where it
+    places. Rank fusion let a weak keyword match on a word most stories share outrank the closest
+    story by meaning, when that story happened to share no words with the question.
     """
-    scores: dict[str, float] = {}
-    stories: dict[str, Story] = {}
-    for ranking in rankings:
-        for rank, story in enumerate(ranking, start=1):
-            scores[story.id] = scores.get(story.id, 0.0) + 1 / (RRF_K + rank)
-            stories.setdefault(story.id, story)
-    return [stories[story_id] for story_id in sorted(scores, key=lambda story_id: -scores[story_id])]
+    similarity = semantic.astype(np.float64)
+    span = float(similarity.max() - similarity.min()) if similarity.size else 0.0
+    rescaled = (similarity - similarity.min()) / span if span else np.zeros_like(similarity)
+    return KEYWORD_WEIGHT * np.asarray(keyword, dtype=np.float64) + (1 - KEYWORD_WEIGHT) * rescaled
 
 
 def search_stories(
@@ -247,15 +231,13 @@ def search_stories(
         raise InvalidStoryError("limit must be at least 1.")
     stories = storage.list_stories()
     index = index or _index
-    keyword = keyword_rank(query, stories)
     if mode == "keyword":
-        ranked = keyword
+        return keyword_rank(query, stories)[:limit]
+    similarities = index.similarities(query, stories)
+    if similarities is None:
+        ranked = keyword_rank(query, stories)
+    elif mode == "semantic":
+        ranked = _by_score(stories, similarities.tolist())
     else:
-        semantic = index.rank(query, stories)
-        if semantic is None:
-            ranked = keyword
-        elif mode == "semantic":
-            ranked = semantic
-        else:
-            ranked = fuse(keyword, semantic)
+        ranked = _by_score(stories, blend(keyword_scores(query, stories), similarities).tolist())
     return ranked[:limit]

@@ -16,5 +16,8 @@ STORY_FIELDS: dict[str, Any] = {
 
 
 def add_story(**overrides: Any) -> storage.Story:
-    """Add a valid story, overriding any fields given."""
-    return storage.add_story(**(STORY_FIELDS | overrides))
+    """Add a valid story, overriding any fields given.
+
+    Duplicates are allowed, since tests build several stories from the same fields.
+    """
+    return storage.add_story(**(STORY_FIELDS | overrides), allow_duplicate=True)

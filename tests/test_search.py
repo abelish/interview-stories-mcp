@@ -51,21 +51,6 @@ def _ids(stories: list[Story]) -> list[str]:
     return [s.id for s in stories]
 
 
-# --- Tokenizing ---------------------------------------------------------------------------
-
-
-def test_tokenize_lowercases_stems_and_drops_stopwords() -> None:
-    assert search.tokenize("Tell me about a time you MENTORED someone") == ["mentor", "someon"]
-
-
-def test_tokenize_splits_on_punctuation_hyphens_and_underscores() -> None:
-    assert search.tokenize("cross-team, data_driven!") == ["cross", "team", "data", "driven"]
-
-
-def test_tokenize_keeps_non_ascii_words() -> None:
-    assert search.tokenize("café") == ["café"]
-
-
 # --- Keyword ranking ------------------------------------------------------------------------
 
 
@@ -197,37 +182,39 @@ def test_semantic_index_returns_none_when_model_fails_and_retries_later(monkeypa
     assert len(attempts) == 2
 
 
-# --- Fusion -------------------------------------------------------------------------------------
+# --- Blending keyword and semantic scores ----------------------------------------------------------
 
 
-def _story(story_id: str) -> Story:
-    return Story(
-        id=story_id,
-        title="",
-        tags=[],
-        situation="",
-        task="",
-        action="",
-        result="",
-        learning="",
-        created_at="",
-        updated_at="",
-    )
+def test_keyword_scores_are_the_share_of_the_query_matched() -> None:
+    both = add_story(title="Mentor", tags=["mentoring", "deadline"])
+    one = add_story(title="Mentor", tags=["mentoring"])
+    none = add_story(title="Unrelated", tags=["other"])
+
+    stories = storage.list_stories()
+    scores = dict(zip(_ids(stories), search.keyword_scores("mentoring deadline", stories), strict=True))
+
+    assert scores[none.id] == 0.0
+    assert 0.0 < scores[one.id] < scores[both.id] < 1.0
 
 
-def test_fuse_rewards_stories_ranked_high_in_either_list() -> None:
-    a, b, c = _story("a"), _story("b"), _story("c")
+def test_blend_weights_keyword_and_rescaled_semantic_equally() -> None:
+    # Semantic similarities are rescaled to 0..1 within the query: 0.9 -> 1 and 0.5 -> 0.
+    blended = search.blend([0.0, 0.8], np.array([0.9, 0.5], dtype=np.float32))
 
-    # a and c each score 1/61 + 1/63, just above b's 2/62. The a/c tie keeps first-seen order.
-    assert _ids(search.fuse([a, b, c], [c, b, a])) == ["a", "c", "b"]
-    # Appearing in both lists beats appearing high in only one.
-    assert _ids(search.fuse([a], [b, a])) == ["a", "b"]
+    assert blended == pytest.approx([0.5, 0.4])
 
 
-def test_fuse_includes_stories_from_every_ranking_once() -> None:
-    a, b, c = _story("a"), _story("b"), _story("c")
+def test_blend_does_not_let_weak_keyword_matches_bury_a_strong_semantic_match() -> None:
+    # The right story shares no words with the question, while the others match a common word weakly.
+    blended = search.blend([0.0, 0.1, 0.1, 0.1], np.array([0.9, 0.3, 0.35, 0.3], dtype=np.float32))
 
-    assert sorted(_ids(search.fuse([a, b], [b, c]))) == ["a", "b", "c"]
+    assert int(np.argmax(blended)) == 0
+
+
+def test_blend_with_identical_similarities_uses_keyword_scores() -> None:
+    blended = search.blend([0.2, 0.6], np.array([0.4, 0.4], dtype=np.float32))
+
+    assert int(np.argmax(blended)) == 1
 
 
 # --- search_stories -------------------------------------------------------------------------------

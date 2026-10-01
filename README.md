@@ -66,7 +66,7 @@ Add to `claude_desktop_config.json`:
 - `list_stories()` — id, title, tags, a one-line summary, and whether the learning is missing, for every story
 - `get_story(story_id)` — full STAR-L text for one story
 - `search_stories(query, limit=5)` — the stories that best fit an interview question, best first
-- `add_story(title, tags, situation, task, action, result, learning)`
+- `add_story(title, tags, situation, task, action, result, learning, allow_duplicate=False)`
 - `update_story(story_id, ...)` — update any subset of fields
 - `delete_story(story_id)`
 
@@ -78,16 +78,28 @@ Tags are lowercased and hyphenated, so "Conflict Resolution" and
 "conflict_resolution" are both stored as `conflict-resolution`, and every
 story needs at least one.
 
+`add_story` won't save a story that looks like one already saved, which is
+what happens when the user tells a story again in different words. It saves
+nothing and names the existing story, so Claude can ask whether to update it,
+keep both (`allow_duplicate=true`), or skip it. A story counts as a retelling
+when it shares at least 45% of its distinct words with a saved one. Retellings
+measured 60-80% and distinct stories at most 30%, even ones on the same theme.
+
 ## Search
 
-`search_stories` combines two rankings:
+`search_stories` blends two scores:
 
 - **Keyword** (BM25): matches words, with tags counting most, then the title,
-  then the STAR-L text. Words are stemmed, and interview boilerplate like
-  "tell me about a time" is ignored.
+  then the STAR-L text. Words are stemmed, and contractions and interview
+  boilerplate like "tell me about a time" are ignored.
 - **Semantic**: matches meaning using a small local embedding model
   ([bge-small-en-v1.5](https://huggingface.co/BAAI/bge-small-en-v1.5), 67 MB),
   so "a coworker" finds a story about "a fellow senior engineer".
+
+Each counts equally. The keyword score is the share of the question a story
+matches, weighted by how rare each word is, so matching a word most stories
+share counts for little. The semantic score is rescaled from 0 to 1 within
+each search.
 
 The model downloads once, on the server's first start, to
 `~/.cache/interview-stories-mcp` (set `STORIES_MODEL_CACHE` to change it) and

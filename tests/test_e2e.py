@@ -102,6 +102,41 @@ async def test_tool_descriptions_say_star_l(client: Client) -> None:
         assert "STAR-L" in description, name
 
 
+async def test_search_description_says_results_are_not_the_whole_bank(client: Client) -> None:
+    # Claude took the top few results as every story it had, and told users nothing fit.
+    tools = {t.name: t for t in (await client.list_tools()).tools}
+    description = tools["search_stories"].description or ""
+
+    assert "not every story" in description
+    assert "list_stories" in description
+
+
+async def test_adding_a_story_twice_asks_for_a_decision_instead_of_saving(client: Client, stories_path: Path) -> None:
+    first = _data(await client.call_tool("add_story", STORY_ARGS))
+
+    retold = STORY_ARGS | {"title": "The launch that slipped"}
+    again = await client.call_tool("add_story", retold)
+
+    assert again.is_error
+    message = _text(again)
+    assert f"'Missed launch' (id {first['id']})" in message
+    assert "Nothing was saved" in message
+    assert "allow_duplicate" in message
+    assert [s["id"] for s in json.loads(stories_path.read_text(encoding="utf-8"))] == [first["id"]]
+
+    kept = await client.call_tool("add_story", retold | {"allow_duplicate": True})
+    assert not kept.is_error, _text(kept)
+    assert len(json.loads(stories_path.read_text(encoding="utf-8"))) == 2
+
+
+async def test_allow_duplicate_is_optional_and_described(client: Client) -> None:
+    tools = {t.name: t for t in (await client.list_tools()).tools}
+    schema = tools["add_story"].input_schema
+
+    assert "allow_duplicate" not in schema["required"]
+    assert "confirmed" in schema["properties"]["allow_duplicate"]["description"]
+
+
 async def test_missing_learning_is_flagged_and_can_be_filled(client: Client, stories_path: Path) -> None:
     legacy = {k: v for k, v in STORY_ARGS.items() if k != "learning"}
     legacy |= {"id": "legacy", "created_at": "2026-01-01T00:00:00+00:00", "updated_at": "2026-01-01T00:00:00+00:00"}
@@ -206,7 +241,7 @@ async def test_natural_language_search_ranks_the_right_story_first(client: Clien
 
 async def test_search_limit_is_bounded_and_respected(client: Client) -> None:
     for i in range(3):
-        await client.call_tool("add_story", STORY_ARGS | {"title": f"Story {i}"})
+        await client.call_tool("add_story", STORY_ARGS | {"title": f"Story {i}", "allow_duplicate": True})
     tools = {t.name: t for t in (await client.list_tools()).tools}
     limit_schema = tools["search_stories"].input_schema["properties"]["limit"]
 
@@ -254,7 +289,8 @@ async def test_two_servers_writing_at_once_keep_every_story(stories_path: Path) 
     async def add_many(server: str) -> None:
         async with Client(_server_params(stories_path), read_timeout_seconds=30) as c:
             for i in range(per_server):
-                result = await c.call_tool("add_story", STORY_ARGS | {"title": f"{server} {i}"})
+                args = STORY_ARGS | {"title": f"{server} {i}", "allow_duplicate": True}
+                result = await c.call_tool("add_story", args)
                 assert not result.is_error, _text(result)
 
     async with anyio.create_task_group() as tg:
